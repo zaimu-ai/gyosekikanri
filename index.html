@@ -902,7 +902,7 @@ function normDate(s) {
 async function readFileText(file) {
   const buf = await file.arrayBuffer();
   let t = new TextDecoder('utf-8', { fatal: false }).decode(buf);
-  if (t.includes('�')) { try { t = new TextDecoder('shift_jis').decode(buf); } catch (e) { } } // Excel既定のShift_JISにも対応
+  if (t.includes('\ufffd')) { try { t = new TextDecoder('shift_jis').decode(buf); } catch (e) { } } // Excel既定のShift_JISにも対応
   return t;
 }
 function pickFile(accept, cb) {
