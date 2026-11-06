@@ -468,7 +468,17 @@ function openDialog(title, bodyHtml, buttons, onMount) {
   if (!d.open) d.showModal();
   onMount && onMount(d);
 }
-function download(name, text, type) {
+async function download(name, text, type) {
+  // claude.ai の非公開ページで開いた場合は、ビューアの保存機能を使う
+  if (window.claude && typeof window.claude.use === 'function') {
+    let ns = null;
+    try { ns = await window.claude.use('downloads'); } catch (e) { ns = null; }
+    if (ns) {
+      try { await ns.save({ filename: name, data: new Blob([text], { type }) }); toast('ファイルを保存しました'); }
+      catch (e) { if (e && e.code !== 'declined') toast(`ファイルを保存できませんでした（${e.code || '不明なエラー'}）`); }
+      return;
+    }
+  }
   const blob = new Blob([text], { type });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
