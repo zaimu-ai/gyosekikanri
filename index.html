@@ -204,6 +204,9 @@ dialog .dlg-hd,dialog .dlg-ft{flex:none}
   .tab[aria-selected="true"]{border-top-color:var(--primary);border-bottom-color:transparent}
   .tab .lucide{width:22px;height:22px}
   .brand .co{display:none}
+  .hdr-row{gap:4px}
+  .hdr-row .icon-btn{width:44px}
+  .badge{padding:4px 8px}
   .stat .val{font-size:24px}
   .chart-box{height:240px}
   .hide-sm{display:none!important}
@@ -282,6 +285,7 @@ const TABS = [
   { id: 'cash', label: '資金繰り表', short: '資金繰り', icon: 'wallet' },
   { id: 'kpi', label: 'KPI', short: 'KPI', icon: 'target' },
   { id: 'fin', label: '財務分析', short: '分析', icon: 'scale' },
+  { id: 'cf', label: 'キャッシュ・フロー計算書', short: 'CF', icon: 'arrow-left-right' },
   { id: 'import', label: 'データ取込', short: '取込', icon: 'file-input' },
 ];
 const SRC_LABEL = { manual: '手入力', csv: '明細CSV', sample: 'サンプル', journal: '仕訳帳', ledger: '総勘定元帳', tb: '試算表', bank: '預金明細' };
@@ -928,11 +932,11 @@ function render() {
   const fk = document.activeElement?.dataset?.fk;
   destroyCharts();
   $('#hdrCompany').textContent = S.settings.company || '';
-  $('#sampleBadge').innerHTML = S.settings.sample ? `<span class="badge">${icon('flask-conical')}サンプルデータ</span>` : '';
+  $('#sampleBadge').innerHTML = S.settings.sample ? `<span class="badge" title="サンプルデータ">${icon('flask-conical')}<span class="hide-sm">サンプルデータ</span><span class="sr-only sm-label">サンプルデータ</span></span>` : '';
   $('#settingsBtn').setAttribute('aria-pressed', ui.tab === 'settings');
   renderTabs(); renderToolbar();
   const main = $('#main');
-  ({ dash: viewDash, pl: viewPL, detail: viewDetail, cash: viewCash, kpi: viewKPI, fin: viewFin, import: viewImport, settings: viewSettings }[ui.tab] || viewDash)(main);
+  ({ dash: viewDash, pl: viewPL, detail: viewDetail, cash: viewCash, kpi: viewKPI, fin: viewFin, cf: viewCF, import: viewImport, settings: viewSettings }[ui.tab] || viewDash)(main);
   drawIcons();
   if (fk) { const el = $(`[data-fk="${CSS.escape(fk)}"]`); if (el) { el.focus(); if (el.select) el.select(); } }
   saveUi();
@@ -967,7 +971,7 @@ function renderToolbar() {
   const last = lastIdx(ui.fy);
   const bepView = ui.tab === 'fin' && ui.finView === 'bep';
   const showMode = ['dash', 'pl', 'kpi'].includes(ui.tab) || bepView;
-  const showMonth = !['detail', 'fin'].includes(ui.tab) || bepView;
+  const showMonth = !['detail', 'fin', 'cf'].includes(ui.tab) || bepView;
   tb.innerHTML = `
     <div class="field"><label for="tbFy">年度</label>
       <select id="tbFy">${fyOptions().map(y => `<option value="${y}" ${y === ui.fy ? 'selected' : ''}>${fyLabel(y)}</option>`).join('')}</select></div>
@@ -2627,26 +2631,76 @@ function fmtInd(v, unit) {
   return String(v);
 }
 function finMonths(fy) { return Object.keys(S.tb?.[fy] || {}).map(Number).filter(i => S.tb[fy][i].rows.some(r => accById(r.acc)?.cat === 'bs' && r.close != null)).sort((a, b) => a - b); }
-function viewFin(main) {
-  if (ui.finView === 'bep') return viewBEP(main);
-  const fy = ui.fy, f = ui.fin ||= { basis: null, m: null, avg: true };
+function finControls(fy, withAvg) {
+  const f = ui.fin ||= { basis: null, m: null, avg: true };
   const fsOk = !!S.annual?.[fy]?.bsItems, tbM = finMonths(fy);
   if (!f.basis || (f.basis === 'fs' && !fsOk && tbM.length) || (f.basis === 'tb' && !tbM.length)) f.basis = fsOk ? 'fs' : 'tb';
   if (f.basis === 'tb' && !tbM.includes(f.m)) f.m = tbM[tbM.length - 1];
-  const oldFs = Object.entries(S.annual || {}).filter(([, a]) => a && !a.bsItems).map(([y]) => fyLabel(+y));
-  const controls = `<div class="form-grid">
-    <div class="field"><label for="fnB">分析の元データ</label><select id="fnB"><option value="fs" ${f.basis === 'fs' ? 'selected' : ''} ${fsOk ? '' : 'disabled'}>決算書（${fyLabel(fy)}）${fsOk ? '' : '：未取込'}</option><option value="tb" ${f.basis === 'tb' ? 'selected' : ''} ${tbM.length ? '' : 'disabled'}>試算表（月末時点）${tbM.length ? '' : '：未取込'}</option></select></div>
+  return `<div class="form-grid">
+    <div class="field"><label for="fnB">元データ</label><select id="fnB"><option value="fs" ${f.basis === 'fs' ? 'selected' : ''} ${fsOk ? '' : 'disabled'}>決算書（${fyLabel(fy)}）${fsOk ? '' : '：未取込'}</option><option value="tb" ${f.basis === 'tb' ? 'selected' : ''} ${tbM.length ? '' : 'disabled'}>試算表（月末時点）${tbM.length ? '' : '：未取込'}</option></select></div>
     ${f.basis === 'tb' && tbM.length ? `<div class="field"><label for="fnM">試算表の月</label><select id="fnM">${tbM.map(i => `<option value="${i}" ${i === f.m ? 'selected' : ''}>${yearOf(fy, i)}年${mLabel(i)}末</option>`).join('')}</select></div>` : ''}
-    <div class="field"><label for="fnAvg">回転率・利益率の資産の額</label><select id="fnAvg"><option value="1" ${f.avg ? 'selected' : ''}>期首と期末の平均</option><option value="0" ${!f.avg ? 'selected' : ''}>期末の額</option></select></div>
+    ${withAvg ? `<div class="field"><label for="fnAvg">回転率・利益率の資産の額</label><select id="fnAvg"><option value="1" ${f.avg ? 'selected' : ''}>期首と期末の平均</option><option value="0" ${!f.avg ? 'selected' : ''}>期末の額</option></select></div>` : ''}
   </div>`;
-  const ctx = finCtx(fy, f.basis, f.m, f.avg);
-  if (!ctx) {
-    main.innerHTML = `<div class="stack">${finSwitch()}<div class="card stack"><h2>財務分析</h2>${controls}
-      <p>財務分析には、貸借対照表の数値が必要です。「データ取込」で、${fyLabel(fy)}の<strong>決算書</strong>（貸借対照表・損益計算書）か、<strong>試算表</strong>（貸借対照表の科目を含むもの）を取り込んでください。</p>
+}
+function finEmptyHtml(fy, title, controls, lead) {
+  const oldFs = Object.entries(S.annual || {}).filter(([, a]) => a && !a.bsItems).map(([y]) => fyLabel(+y));
+  return `<div class="card stack"><h2>${title}</h2>${controls}
+      <p>${lead}「データ取込」で、${fyLabel(fy)}の<strong>決算書</strong>（貸借対照表・損益計算書）か、<strong>試算表</strong>（貸借対照表の科目を含むもの）を取り込んでください。</p>
       <p class="small muted">キャッシュ・フロー計算書と、営業キャッシュ・フローを使う指標には、期首の貸借対照表（前期の決算書、または期首残高のある試算表）も必要です。</p>
       ${oldFs.length ? `<div class="notice warn">${icon('triangle-alert')}<span>${oldFs.join('、')}の決算書は、貸借対照表を保存する前の版で取り込まれています。お手数ですが、もう一度取り込んでください。</span></div>` : ''}
       <div class="row"><button class="btn primary" data-go="import">${icon('file-input')}データ取込へ</button>${S.settings.sample ? `<button class="btn" data-act="addSampleFin">${icon('flask-conical')}サンプルの決算書・試算表を追加</button>` : ''}</div>
-      ${S.settings.sample ? '<p class="small muted">サンプルデータを以前の版で作成した場合は「サンプルの決算書・試算表を追加」で、架空の決算書（前期・前々期）と当期の試算表を追加できます。既存のデータは変更しません。</p>' : ''}</div></div>`;
+      ${S.settings.sample ? '<p class="small muted">サンプルデータを以前の版で作成した場合は「サンプルの決算書・試算表を追加」で、架空の決算書（前期・前々期）と当期の試算表を追加できます。既存のデータは変更しません。</p>' : ''}</div>`;
+}
+function viewCF(main) {
+  const fy = ui.fy, controls = finControls(fy, false), f = ui.fin;
+  const ctx = finCtx(fy, f.basis, f.m, f.avg);
+  if (!ctx) { main.innerHTML = `<div class="stack">${finEmptyHtml(fy, 'キャッシュ・フロー計算書', controls, 'キャッシュ・フロー計算書には、期首と期末の貸借対照表と損益計算書が必要です。')}</div>`; return; }
+  const cf = ctx.cf, pctx = f.basis === 'fs' ? finCtx(fy - 1, 'fs', null, f.avg) : null, cfP = pctx?.cf;
+  const colT = esc(ctx.title.replace(/（.*$/, ''));
+  const warn = ctx.notes.filter(n => !/純資産|年換算/.test(n) || /年換算/.test(n) && false);
+  for (const [B, l] of [[ctx.B1, '期末'], [ctx.B0, '期首']]) if (B) { B.mism.forEach(m => warn.push(`${l}：${m}`)); if (B.unk.length) warn.push(`${l}の貸借対照表に分類できない科目があります（${B.unk.map(x => x.name).join('、')}）。「財務分析」タブの「科目の分類」で区分を選んでください。`); }
+  const card = (label, v, pv, note) => `<div class="card stat"><div class="lbl">${label}</div><div class="val ${v < 0 ? 'bad' : ''}">${yen(v)}<small>${unitK() ? '千円' : '円'}</small></div>${cfP ? `<span class="kvline"><span>${fyLabel(fy - 1)}</span><span>${yen(pv)}</span></span>` : ''}${note ? `<span class="kvline"><span>${note}</span><span></span></span>` : ''}</div>`;
+  if (!cf) {
+    main.innerHTML = `<div class="stack"><div class="card stack"><div class="card-hd" style="margin:0"><h2>キャッシュ・フロー計算書　${esc(ctx.title)}</h2></div>${controls}
+      <p>期首の貸借対照表がないため作成できません。前期（${fyLabel(fy - 1)}）の決算書、または期首残高（前月残高）の列がある試算表を取り込んでください。</p>
+      <div class="row"><button class="btn primary" data-go="import">${icon('file-input')}データ取込へ</button></div></div></div>`;
+    return;
+  }
+  const fcf = cf.op + cf.inv, fcfP = cfP ? cfP.op + cfP.inv : null;
+  main.innerHTML = `<div class="stack">
+    <div class="card stack"><div class="card-hd" style="margin:0"><h2>キャッシュ・フロー計算書（間接法）　${esc(ctx.title)}</h2><button class="btn sm" data-act="csvCF">${icon('file-down')}CSV出力</button><button class="btn sm hide-sm" onclick="window.print()">${icon('printer')}印刷</button></div>${controls}
+      <p class="small muted">期首：${esc(ctx.B0.label)}　／　期末：${esc(ctx.B1.label)}　／　損益：${f.basis === 'fs' ? '決算書の損益計算書' : `損益の実績（${mLabel(0)}〜${mLabel(f.m)}）`}　／　${unitNote()}</p></div>
+    ${warn.map(w => `<div class="notice warn">${icon('triangle-alert')}<span>${esc(w)}</span></div>`).join('')}
+    <div class="grid g-kpi">
+      ${card('営業活動によるキャッシュ・フロー', cf.op, cfP?.op)}${card('投資活動によるキャッシュ・フロー', cf.inv, cfP?.inv)}${card('財務活動によるキャッシュ・フロー', cf.fin, cfP?.fin)}
+      ${card('フリー・キャッシュ・フロー', fcf, fcfP, '営業CF＋投資CF')}${card('現金及び現金同等物の増減額', cf.total, cfP?.total)}
+    </div>
+    <div class="card"><div class="card-hd"><h3>計算書</h3><span class="small muted">${unitNote()}</span></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>区分</th><th>${colT}</th>${cfP ? `<th>${fyLabel(fy - 1)}</th>` : ''}</tr></thead><tbody>
+        ${cf.lines.map((l, i) => `<tr class="${l.cls}"><td class="rowh">${esc(l.label)}</td><td class="num">${l.v == null ? '' : yen(l.v)}</td>${cfP ? `<td class="num">${cfP.lines[i]?.v == null ? '' : yen(cfP.lines[i].v)}</td>` : ''}</tr>`).join('')}
+        <tr class="chk"><td class="rowh">検算：貸借対照表の現金及び預金（期末）</td><td class="num">${yen(cf.cashEnd)} ${Math.abs(cf.diff) < 1 ? `<span class="good">${icon('check')}一致</span>` : `<span class="bad">差額 ${yenSigned(-cf.diff)}</span>`}</td>${cfP ? `<td class="num">${yen(cfP.cashEnd)} ${Math.abs(cfP.diff) < 1 ? `<span class="good">${icon('check')}一致</span>` : `<span class="bad">差額 ${yenSigned(-cfP.diff)}</span>`}</td>` : ''}</tr>
+      </tbody></table></div>
+      <p class="small muted" style="margin-top:8px">期首と期末の貸借対照表の増減と損益計算書から作成しています（間接法）。固定資産の取得は「固定資産の増加＋減価償却費」で求めた売却との純額です。現金及び現金同等物は「現金及び預金」としています。${f.basis === 'tb' ? '期中（試算表）の金額は年換算していません。' : ''}${Math.abs(cf.diff) >= 1 ? '<strong>差額がある場合は、「財務分析」タブの科目の分類（未分類の科目）や、書類の合計と科目の合計の不一致を確認してください。</strong>' : ''}</p>
+    </div>
+    <div class="card"><div class="card-hd"><h3>区分別の比較</h3></div><div class="chart-box"><canvas id="cCF" role="img" aria-label="営業・投資・財務キャッシュ・フローとフリー・キャッシュ・フロー"></canvas></div></div>
+    <div class="card"><div class="card-hd"><h3>関連する指標</h3><button class="btn text sm" data-go="fin">${icon('scale')}財務分析へ</button></div>
+      ${(() => { const I = finIndicators(ctx); const g = k => I.find(x => x.key === k); return `<div class="tbl-wrap"><table class="tbl fin"><thead><tr><th>指標</th><th>${colT}</th></tr></thead><tbody>${['capexcf', 'payback'].map(k => { const x = g(k); return `<tr><td class="rowh">${esc(x.name)}<div class="small muted wrap">${esc(x.detail)}</div></td><td class="num" style="font-weight:700">${fmtInd(x.val, x.unit)}</td></tr>`; }).join('')}</tbody></table></div>`; })()}
+    </div>
+  </div>`;
+  const labels = ['営業CF', '投資CF', '財務CF', 'フリーCF'];
+  mkChart('cCF', { type: 'bar', data: { labels, datasets: [barDs(colT.replace(/（.*$/, ''), [cf.op, cf.inv, cf.fin, fcf], css('--s-actual')), ...(cfP ? [barDs(fyLabel(fy - 1), [cfP.op, cfP.inv, cfP.fin, fcfP], css('--s-budget'))] : [])] } });
+}
+function csvCF() {
+  const f = ui.fin, ctx = finCtx(ui.fy, f.basis, f.m, f.avg); if (!ctx?.cf) return;
+  const rows = [['キャッシュ・フロー計算書（間接法）', ctx.title], ['区分', '金額（円）'], ...ctx.cf.lines.map(l => [l.label, l.v == null ? '' : Math.round(l.v)]), ['検算差額', Math.round(-ctx.cf.diff)]];
+  return download(`キャッシュフロー計算書_${fyLabel(ui.fy)}_${stamp()}.csv`, '\ufeff' + toCsv(rows), 'text/csv');
+}
+function viewFin(main) {
+  if (ui.finView === 'bep') return viewBEP(main);
+  const fy = ui.fy, controls = finControls(fy, true), f = ui.fin;
+  const ctx = finCtx(fy, f.basis, f.m, f.avg);
+  if (!ctx) {
+    main.innerHTML = `<div class="stack">${finSwitch()}${finEmptyHtml(fy, '財務分析', controls, '財務分析には、貸借対照表の数値が必要です。')}</div>`;
     return;
   }
   const I = finIndicators(ctx);
@@ -2674,13 +2728,9 @@ function viewFin(main) {
     <div class="card"><div class="card-hd"><h2>収益性分析</h2></div>${tbl('prof')}</div>
     <div class="card"><div class="card-hd"><h2>安全性分析</h2></div>${tbl('safe')}
       <p class="small muted" style="margin-top:8px">安全性の比率は期末の貸借対照表で計算しています。「—」はデータ不足または計算できない場合です（理由は各行の説明に表示）。</p></div>
-    <div class="card"><div class="card-hd"><h2>キャッシュ・フロー計算書（間接法）</h2><span class="small muted">${unitNote()}</span></div>
-      ${cf ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>区分</th><th>${esc(ctx.title.replace(/（.*$/, ''))}</th>${cfP ? `<th>${fyLabel(fy - 1)}</th>` : ''}</tr></thead><tbody>
-        ${cf.lines.map((l, i) => `<tr class="${l.cls}"><td class="rowh">${esc(l.label)}</td><td class="num">${l.v == null ? '' : yen(l.v)}</td>${cfP ? `<td class="num">${cfP.lines[i]?.v == null ? '' : yen(cfP.lines[i].v)}</td>` : ''}</tr>`).join('')}
-        <tr class="chk"><td class="rowh">検算：貸借対照表の現金及び預金（期末）</td><td class="num">${yen(cf.cashEnd)} ${Math.abs(cf.diff) < 1 ? `<span class="good">${icon('check')}一致</span>` : `<span class="bad">差額 ${yenSigned(-cf.diff)}</span>`}</td>${cfP ? `<td class="num">${yen(cfP.cashEnd)} ${Math.abs(cfP.diff) < 1 ? `<span class="good">${icon('check')}一致</span>` : `<span class="bad">差額 ${yenSigned(-cfP.diff)}</span>`}</td>` : ''}</tr>
-      </tbody></table></div>
-      <p class="small muted" style="margin-top:8px">期首と期末の貸借対照表の増減と損益計算書から作成しています（間接法）。固定資産の取得は「固定資産の増加＋減価償却費」で求めた売却との純額です。現金及び現金同等物は「現金及び預金」としています。${Math.abs(cf.diff) >= 1 ? '<strong>差額がある場合は、科目の分類（未分類の科目）や、書類の合計と科目の合計の不一致を確認してください。</strong>' : ''}</p>`
-      : `<p class="small muted">期首の貸借対照表がないため作成できません。前期（${fyLabel(fy - 1)}）の決算書、または期首残高（前月残高）の列がある試算表を取り込んでください。</p>`}
+    <div class="card"><div class="card-hd"><h2>キャッシュ・フロー</h2><button class="btn sm" data-go="cf">${icon('arrow-left-right')}キャッシュ・フロー計算書を開く</button></div>
+      ${cf ? `<dl class="kv small"><dt>営業活動によるキャッシュ・フロー</dt><dd>${yen(cf.op)}</dd><dt>投資活動によるキャッシュ・フロー</dt><dd>${yen(cf.inv)}</dd><dt>財務活動によるキャッシュ・フロー</dt><dd>${yen(cf.fin)}</dd><dt>現金及び預金の期末残高との検算</dt><dd>${Math.abs(cf.diff) < 1 ? `<span class="good">${icon('check')}一致</span>` : `<span class="bad">差額 ${yenSigned(-cf.diff)}</span>`}</dd></dl>`
+      : `<p class="small muted">期首の貸借対照表がないため作成できません。</p>`}
     </div>
     <div class="card"><div class="card-hd"><h2>要約貸借対照表</h2><span class="small muted">${unitNote()}</span></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>区分</th>${ctx.B0 ? '<th>期首</th>' : ''}<th>期末</th>${ctx.B0 ? '<th>増減</th>' : ''}</tr></thead><tbody>
@@ -2842,7 +2892,7 @@ function viewBEP(main) {
 }
 function finSwitch() {
   const v = ui.finView || 'ratio';
-  return `<div class="seg no-print" role="group" aria-label="財務分析の表示" style="align-self:flex-start"><button type="button" data-finview="ratio" aria-pressed="${v === 'ratio'}">${icon('scale')} 財務指標・CF計算書</button><button type="button" data-finview="bep" aria-pressed="${v === 'bep'}">${icon('chart-line')} 損益分岐点</button></div>`;
+  return `<div class="seg no-print" role="group" aria-label="財務分析の表示" style="align-self:flex-start"><button type="button" data-finview="ratio" aria-pressed="${v === 'ratio'}">${icon('scale')} 財務指標</button><button type="button" data-finview="bep" aria-pressed="${v === 'bep'}">${icon('chart-line')} 損益分岐点</button></div>`;
 }
 
 /* ---------- 設定・データ ---------- */
@@ -3047,7 +3097,7 @@ document.addEventListener('click', ev => {
   const act = ds.act;
   if (!act) return;
   const acts = {
-    csvPL, csvCash, csvFin,
+    csvPL, csvCash, csvFin, csvCF,
     resetVar: () => { S.varRates = {}; save('変動費の割合を標準に戻しました'); render(); },
     addSampleFin: () => { const fy = fyIdx(isoDate(new Date())).fy; snapshot('サンプルの決算書追加の前'); sampleFinance(S, fy, fyIdx(isoDate(new Date())).i - 1); ui.fin = { basis: null, m: null, avg: true }; save('サンプルの決算書・試算表を追加しました'); render(); },
     exportCsv: exportEntriesCsv, importCsv: importCsvFlow, exportJson, importJson: () => importJsonFlow(),
