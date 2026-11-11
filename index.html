@@ -669,8 +669,11 @@ function agg(fy) {
     }
     if (srcs.length) { monthSrc[i] = srcs; last = i; for (const id in vals) if (vals[id][i] == null) vals[id][i] = 0; }
   }
+  // 実績の締め月を手動で決めた場合は、それより後の月を未確定（—）にする（先日付の定期仕訳などを実績に含めないため）
+  const autoLast = last, ov = S.settings.closeMonth?.[fy];
+  if (ov != null && ov >= -1 && ov < last) { for (const id in vals) for (let i = ov + 1; i < 12; i++) vals[id][i] = null; for (let i = ov + 1; i < 12; i++) monthSrc[i] = null; last = ov; }
   const gaps = []; for (let i = 0; i < last; i++) if (!monthSrc[i]) gaps.push(i);
-  return (cache['a' + fy] = { lines: vals, last, monthSrc, gaps });
+  return (cache['a' + fy] = { lines: vals, last, autoLast, monthSrc, gaps, manual: ov != null && ov < autoLast });
 }
 const actualLine = (fy, acc) => agg(fy).lines[acc] || nulls();
 const lastIdx = fy => agg(fy).last;
@@ -721,7 +724,7 @@ function plRows(lineFn) {
     if (c.id === 'cogs') rows.push(tot.gross = { type: 'total', key: 'gross', label: '売上総利益（粗利）', vals: zip(tot.sales, tot.cogs, sub) });
     if (c.id === 'sga') rows.push(tot.op = { type: 'total', key: 'op', label: '営業利益', vals: zip(tot.gross.vals, tot.sga, sub) });
     if (c.id === 'noe') rows.push(tot.ord = { type: 'total', key: 'ord', label: '経常利益', vals: zip(zip(tot.op.vals, tot.noi, add), tot.noe, sub) });
-    if (c.id === 'spl') { const pre = zip(zip(tot.ord.vals, tot.spi, add), tot.spl, sub); tot.pre = pre; if (tot.spi.some(v => v != null) || tot.spl.some(v => v != null) || S.accounts.some(a => a.cat === 'ctax')) rows.push({ type: 'total', key: 'pre', label: '税引前当期純利益', vals: pre }); }
+    if (c.id === 'spl') { const pre = zip(zip(tot.ord.vals, tot.spi, add), tot.spl, sub); tot.pre = pre; if (S.accounts.some(a => ['spi', 'spl', 'ctax'].includes(a.cat))) rows.push({ type: 'total', key: 'pre', label: '税引前当期純利益', vals: pre }); }
     if (c.id === 'ctax' && accs.length) rows.push({ type: 'total', key: 'net', label: '当期純利益', vals: zip(tot.pre, tot.ctax, sub) });
   }
   return rows;
@@ -1114,7 +1117,8 @@ function renderToolbar() {
       <div class="seg" role="group" aria-labelledby="modeLbl">
         ${[['month', '単月'], ['cum', '期首から累計'], ['year', '通期']].map(([k, l]) => `<button type="button" data-mode="${k}" aria-pressed="${ui.mode === k}">${l}</button>`).join('')}
       </div></div>` : ''}
-    <div class="small muted" style="padding-bottom:12px">${fyRangeText(ui.fy)}／実績の締め月：${last >= 0 ? `${yearOf(ui.fy, last)}年${mLabel(last)}` : 'この年度の実績はまだありません'}</div>`;
+    ${(() => { const A_ = agg(ui.fy); return A_.autoLast >= 0 ? `<div class="field"><label for="tbClose">実績の締め月</label><select id="tbClose">${Array.from({ length: A_.autoLast + 1 }, (_, i) => i).reverse().map(i => `<option value="${i === A_.autoLast ? 'auto' : i}" ${(A_.manual ? i === A_.last : i === A_.autoLast) ? 'selected' : ''}>${yearOf(ui.fy, i)}年${mLabel(i)}${i === A_.autoLast ? '（自動：データの最終月）' : ''}</option>`).join('')}</select></div>` : ''; })()}
+    <div class="small muted" style="padding-bottom:12px">${fyRangeText(ui.fy)}${last >= 0 ? '' : '／この年度の実績はまだありません'}</div>`;
 }
 function periodText() {
   if (ui.mode === 'month') return `${yearOf(ui.fy, ui.m)}年${mLabel(ui.m)}`;
@@ -1656,11 +1660,31 @@ function linesToTable(type, lines) {
   }
   return { headers, rows, lines };
 }
-function csvToTable(type, rows) {
+// 弥生会計「仕訳日記帳」のExcel書き出しのように、上段に「借方」「貸方」、下段に「勘定科目」「金額」…が並ぶ2段の見出しを1段にまとめる
+function mergeTwoRowHeader(top, sub) {
+  const T = top.map(c => nfkc(c)), B = (sub || []).map(c => nfkc(c));
+  if (!T.some(c => /^借方$/.test(c)) || !T.some(c => /^貸方$/.test(c))) return null;
+  const acc = B.map((c, i) => /勘定科目|^科目$/.test(c) ? i : -1).filter(i => i >= 0);
+  if (acc.length < 2) return null;
+  const [d0, c0] = acc, n = Math.max(T.length, B.length);
+  return Array.from({ length: n }, (_, i) => {
+    const sb = B[i] || '', tp = T[i] || '';
+    if (sb && i >= d0 && i < c0) return '借方' + sb;
+    if (sb && i >= c0 && !(tp && !/^(借方|貸方)$/.test(tp))) return '貸方' + sb;
+    return tp && !/^(借方|貸方)$/.test(tp) ? tp : sb;
+  });
+}
+function findHeader(type, rows) {
   let best = -1, bi = 0;
-  rows.slice(0, 15).forEach((r, i) => { const sc = headerScore(type, r); if (sc > best) { best = sc; bi = i; } });
+  rows.slice(0, 20).forEach((r, i) => { const m = mergeTwoRowHeader(r, rows[i + 1]); const sc = headerScore(type, m || r) + (m ? 1 : 0); if (sc > best) { best = sc; bi = i; } });
+  const merged = mergeTwoRowHeader(rows[bi] || [], rows[bi + 1]);
+  return { best, bi, merged };
+}
+function csvToTable(type, rows) {
+  const { best, bi, merged } = findHeader(type, rows);
   if (best < 2) return { headers: null, rows };
-  return { headers: rows[bi].map(h => h.trim()), rows: rows.slice(bi + 1), pre: rows.slice(0, bi) };
+  if (merged) return { headers: merged, rows: rows.slice(bi + 2), pre: rows.slice(0, bi), twoRow: true };
+  return { headers: rows[bi].map(h => String(h).trim()), rows: rows.slice(bi + 1), pre: rows.slice(0, bi) };
 }
 function detectType(name, text, rows) {
   const n = nfkc(name) + ' ' + nfkc(text).slice(0, 3000) + ' ' + normName(String(text).slice(0, 3000));   // 「貸 借 対 照 表」のような字間の空白も判定
@@ -1670,6 +1694,7 @@ function detectType(name, text, rows) {
   const rowHas = (r, re) => r.some(c => re.test(c));
   if (head.some(r => rowHas(r, /借方(勘定)?科目/) && rowHas(r, /貸方(勘定)?科目/))) return 'journal';
   if (head.some(r => rowHas(r, /^(CSJS201|OBCD001)$/i) || (rowHas(r, /借方本体金額/) && rowHas(r, /貸方本体金額/)))) return 'journal';   // 勘定奉行
+  if (head.some((r, i) => { const m = mergeTwoRowHeader(r, head[i + 1]); return m && m.includes('借方勘定科目') && m.includes('貸方勘定科目'); })) return 'journal';   // 2段見出しの仕訳日記帳
   if (head.some(r => rowHas(r, /相手/) && rowHas(r, /借方/) && rowHas(r, /貸方/))) return 'ledger';
   if (head.some(r => r.filter(c => /^\d{1,2}月/.test(c)).length >= 2)) return 'tb';
   if (head.some(r => rowHas(r, /借方/) && rowHas(r, /貸方/) && rowHas(r, /残高/) && rowHas(r, /科目/))) return 'tb';
@@ -1772,10 +1797,11 @@ function yayoiTable(rows) {
   });
   return { headers, rows: out };
 }
-const SOFT_LABEL = { yayoi: '弥生会計（弥生インポート形式）', mf: 'マネーフォワード クラウド会計', bugyo: '勘定奉行（OBC受入形式）' };
+const SOFT_LABEL = { yayoiX: '弥生会計（仕訳日記帳のExcel・CSV書き出し）', yayoi: '弥生会計（弥生インポート形式）', mf: 'マネーフォワード クラウド会計', bugyo: '勘定奉行（OBC受入形式）' };
 function detectSoft(tbl) {
   const h = (tbl?.headers || []).map(x => nfkc(x));
   if (h[0] === '識別フラグ') return 'yayoi';
+  if (h.some(x => /^借方税計算区分$/.test(x)) || (h.includes('伝票No.') && h.some(x => /^付箋/.test(x)) && h.includes('借方勘定科目'))) return 'yayoiX';
   if (h.some(x => /^(OBCD001|CSJS\d{3}|GL\d{7})$/i.test(x) || x === '伝票区切' || /本体金額/.test(x))) return 'bugyo';
   if (h.includes('取引No') && h.some(x => /^借方金額\(円\)$/.test(x))) return 'mf';
   return null;
@@ -1793,6 +1819,7 @@ function parseJournalTable(tbl, o) {
   const nameOf = c => { if (!codeAcc || !c) return c; codes.add(c); return nfkc(o.codeNames?.[c] || S.codeMap?.[(o.soft || 'code') + ':' + c] || '') || `科目コード${c}`; };
   tbl.rows.forEach((r, ri) => {
     const ds = cellOf(r, map, 'date');
+    if (/^(日付|取引日|伝票日付)$/.test(nfkc(ds)) || /^(勘定科目)$/.test(nfkc(cellOf(r, map, 'dacc')))) return;   // ページごとの見出しの繰り返し
     let date = ds ? parseJpDate(ds, { fy: o.fy, flags, excel: o.excel }) : null;
     const dacc = nameOf(nfkc(cellOf(r, map, 'dacc'))), cacc = nameOf(nfkc(cellOf(r, map, 'cacc')));
     const damt = parseNum(cellOf(r, map, 'damt')), camt = parseNum(cellOf(r, map, 'camt'));
@@ -2190,6 +2217,15 @@ function previewBody(P, typeSel) {
     if (manualOverlap) warns.push(`同じ月に手入力・簡易CSV・サンプルの明細が${manualOverlap}件あります。仕訳帳と同じ取引なら二重計上になるため、取込後に明細画面で削除してください。`);
     const ex = S.imports.filter(b => b.type === 'journal' && b.months?.some(m => months.includes(m)));
     if (ex.length) warns.push(`同じ月の仕訳帳を取込済みです（${ex.map(b => esc(b.file)).join('、')}）。重複する行は取り込みません。`);
+    if (dates.length) {
+      const cnt = {}; for (const d of dates) cnt[d.slice(0, 7)] = (cnt[d.slice(0, 7)] || 0) + 1;
+      const ms = Object.keys(cnt).sort(), mx = Math.max(...Object.values(cnt));
+      let k = ms.length; while (k > 0 && cnt[ms[k - 1]] < mx * 0.1) k--;
+      if (k > 0 && k < ms.length && ms.length - k >= 2) warns.push(`${ms[k].replace('-', '年')}月以降は仕訳が少ない月が続きます（各月${Math.min(...ms.slice(k).map(m => cnt[m]))}〜${Math.max(...ms.slice(k).map(m => cnt[m]))}件）。先日付で入力した定期の振替伝票などが含まれている可能性があります。取り込んだ後、画面上部の「実績の締め月」で、実績として扱う最後の月（例：${ms[k - 1].replace('-', '年')}月）を選べます。`);
+      const first = dates[0], lastD = dates[dates.length - 1], fm = +first.slice(5, 7);
+      const span = (+lastD.slice(0, 4) - +first.slice(0, 4)) * 12 + (+lastD.slice(5, 7) - fm) + 1;
+      if (span >= 10 && fm !== fyStart()) warns.push(`このデータは${+first.slice(0, 4)}年${fm}月〜${+lastD.slice(0, 4)}年${+lastD.slice(5, 7)}月の範囲です。会社の決算月（現在${closingMonth()}月決算）と合っていない可能性があります。${(fm + 10) % 12 + 1}月決算の場合は、取り込む前に「設定」の「会社情報」で決算月を変更してください。`);
+    }
     if (r.check.taxN) {
       const tn = taxDefault(P);
       opts = `<div class="field"><label for="ipTax">損益に使う金額（税額の列が${r.check.taxN}行にあります）</label><select id="ipTax" data-opt="taxNet"><option value="net" ${tn === 'net' ? 'selected' : ''}>税抜（金額−税額）：税抜経理の場合</option><option value="gross" ${tn === 'gross' ? 'selected' : ''}>税込（金額のまま）：税込経理の場合</option></select></div>`;
@@ -3394,6 +3430,7 @@ document.addEventListener('change', ev => {
   if (t.closest('#dlg')) return;
   if (t.id === 'tbFy' || t.id === 'bFy') { ui.fy = +t.value; ui.m = null; ensureUi(); ui.d.limit = 200; ui.rv.m = null; render(); return; }
   if (t.id === 'tbM') { ui.m = +t.value; ui.rv.m = +t.value; render(); return; }
+  if (t.id === 'tbClose') { const cm = (S.settings.closeMonth ||= {}); if (t.value === 'auto') delete cm[ui.fy]; else cm[ui.fy] = +t.value; ui.m = null; save(t.value === 'auto' ? '実績の締め月を自動に戻しました' : `実績の締め月を${mLabel(+t.value)}にしました（それより後は未確定として扱います）`); render(); return; }
   if (t.id === 'plSer') { ui.plSeries = t.value; render(); return; }
   if (t.id === 'plChartSel') { ui.plChart = t.value; render(); return; }
   if (t.id === 'rvM') { ui.rv.m = +t.value; ui.rv.limit = 200; render(); return; }
