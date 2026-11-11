@@ -72,6 +72,12 @@ button,input,select,textarea{font:inherit;color:inherit;letter-spacing:inherit}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:18px;white-space:nowrap}
 .brand .co{font-weight:400;font-size:14px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;max-width:30vw}
 .spacer{flex:1}
+.co-sel{min-height:40px;max-width:280px;min-width:0;font-weight:700;padding:4px 32px 4px 10px;text-overflow:ellipsis}
+.subnav{display:flex;flex-wrap:wrap;gap:8px}
+.chip{appearance:none;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;border:1px solid var(--border-strong);border-radius:999px;background:var(--surface);color:var(--text-2);cursor:pointer;font-weight:500}
+.chip:hover{background:var(--surface-2)}
+.chip[aria-pressed="true"]{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.chip .lucide{width:18px;height:18px}
 .badge{display:inline-flex;align-items:center;gap:4px;font-size:14px;line-height:1.3;padding:4px 10px;border-radius:999px;border:1px solid var(--warn-border);background:var(--warn-bg);color:var(--warn-text);white-space:nowrap}
 .badge .lucide{width:16px;height:16px}
 .save-state{font-size:14px;color:var(--text-3);display:flex;align-items:center;gap:4px;white-space:nowrap}
@@ -86,7 +92,7 @@ button,input,select,textarea{font:inherit;color:inherit;letter-spacing:inherit}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .field>label,.field>.lbl{font-size:14px;line-height:1.4;color:var(--text-2);font-weight:500}
 .req{font-size:12px;color:var(--bad);margin-left:4px;font-weight:700}
-select,input[type=text],input[type=date],input[type=number],input[type=search],textarea{min-height:48px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface);max-width:100%}
+select,input[type=text],input[type=date],input[type=number],input[type=search],input[type=tel],input[type=email],textarea{min-height:48px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface);max-width:100%}
 textarea{min-height:96px}
 input::placeholder{color:var(--text-3)}
 .seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--radius);overflow:hidden;background:var(--surface)}
@@ -205,6 +211,8 @@ dialog .dlg-hd,dialog .dlg-ft{flex:none}
   .tab .lucide{width:22px;height:22px}
   .brand .co{display:none}
   .hdr-row{gap:4px}
+  .hdr-row{flex-wrap:wrap;row-gap:6px;padding-bottom:10px}
+  .co-sel{order:10;flex:1 1 100%;max-width:none;width:auto;font-size:16px}   /* スマホでは会社の切り替えを2段目に全幅で表示 */
   .hdr-row .icon-btn{width:44px}
   .badge{padding:4px 8px}
   .stat .val{font-size:24px}
@@ -225,7 +233,8 @@ dialog .dlg-hd,dialog .dlg-ft{flex:none}
 <body>
 <header class="app-header">
   <div class="hdr-row">
-    <div class="brand"><i data-lucide="chart-column"></i><span>業績管理</span><span class="co" id="hdrCompany"></span></div>
+    <div class="brand"><i data-lucide="chart-column"></i><span class="hide-sm">業績管理</span></div>
+    <label for="coSel" class="sr-only">会社を選択</label><select id="coSel" class="co-sel" hidden></select>
     <span id="sampleBadge"></span>
     <div class="spacer"></div>
     <span class="save-state" id="saveState" aria-live="polite"></span>
@@ -354,7 +363,7 @@ function emptyState() {
     settings: { company: '', fyStart: 4, unit: 'yen', minCash: 5000000, tax: '税抜', sample: false, cashLag: 1, useDefaultRules: true },
     accounts: defaultAccounts(),
     budgets: {}, entries: [], cash: {}, kpis: [],
-    cashTx: [], banks: [], tb: {}, annual: {}, imports: [], rules: [], counterRules: {}, bsGroups: {},
+    cashTx: [], banks: [], tb: {}, annual: {}, imports: [], rules: [], counterRules: {}, bsGroups: {}, profile: emptyProfile(),
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
 }
@@ -384,6 +393,8 @@ function migrate(d) {
     c.kind = c.kind || Array(12).fill('plan');
   }
   for (const a of d.accounts) if (a.cash == null && a.cat === 'bs') a.cash = RE.cash.test(normName(a.name));
+  d.profile = Object.assign(emptyProfile(), d.profile || {});
+  if (!d.profile.short && d.settings.company) d.profile.short = d.settings.company;
   d.schema = SCHEMA;
   return d;
 }
@@ -404,43 +415,157 @@ const IDB = {
   set(k, v) { return new Promise((res, rej) => { const tx = IDB.db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('abort')); }); },
 };
 const bc = window.BroadcastChannel ? new BroadcastChannel('gyosekikanri') : null;
-let migratedFromLS = false;
+/* ---------- 会社（複数）：会社ごとに別のキーへ保存 ---------- */
+const REGKEY = 'gyosekikanri.companies.v1';
+let REG = { companies: [], current: null, trash: [] };
+let migratedLegacy = false;
+const dKey = id => storeMode === 'idb' ? 'data:' + id : KEY + ':' + id;
+const bKey = id => storeMode === 'idb' ? 'backups:' + id : BKEY + ':' + id;
+async function kvGet(k) { return storeMode === 'idb' ? IDB.get(k) : localStorage.getItem(k); }
+async function kvSet(k, v) { if (storeMode === 'idb') return IDB.set(k, v); localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }
+async function kvGetJSON(k) { const v = await kvGet(k); if (v == null) return null; return typeof v === 'string' ? JSON.parse(v) : v; }
+async function saveReg() { await kvSet(storeMode === 'idb' ? 'companies' : REGKEY, storeMode === 'idb' ? REG : JSON.stringify(REG)); }
+const emptyProfile = () => ({ name: '', short: '', corpNo: '', founded: '', industry: '', capital: null, rep: '', address: '', tel: '', employees: null, software: '', memo: '' });
+const companyName = d => (d?.profile?.short || d?.settings?.company || d?.profile?.name || '').trim() || '名称未設定の会社';
+const closingMonth = () => (fyStart() + 10) % 12 + 1;
 async function load() {
+  try { await IDB.open(); storeMode = 'idb'; } catch (e) { storeMode = 'ls'; }
+  try { REG = await kvGetJSON(storeMode === 'idb' ? 'companies' : REGKEY); } catch (e) { REG = null; }
+  if (!REG) {
+    // 以前の版（会社1社）のデータを最初の会社として引き継ぐ。元の保存データは消さずに残す
+    REG = { companies: [], current: null, trash: [] };
+    let raw = null, bk = [];
+    if (storeMode === 'idb') { try { raw = await IDB.get('data'); bk = (await IDB.get('backups')) || []; } catch (e) { } }
+    if (raw == null) { try { raw = localStorage.getItem(KEY); } catch (e) { } }
+    if (!bk.length) { try { bk = JSON.parse(localStorage.getItem(BKEY) || '[]'); } catch (e) { bk = []; } }
+    if (raw) {
+      const id = 'c' + uid(); let name = '会社1';
+      try { name = companyName(JSON.parse(raw)); } catch (e) { }
+      REG.companies.push({ id, name }); REG.current = id;
+      await kvSet(dKey(id), raw); await kvSet(bKey(id), storeMode === 'idb' ? bk : JSON.stringify(bk));
+      await saveReg(); migratedLegacy = true;
+    }
+  }
+  REG.trash ||= []; REG.companies ||= [];
+  if (!REG.companies.some(c => c.id === REG.current)) REG.current = REG.companies[0]?.id || null;
+  await loadCompany(REG.current);
+  try { const u = JSON.parse(localStorage.getItem(UIKEY) || 'null'); if (u) ui = Object.assign(ui, u, { editId: null }); ui.d = Object.assign({ from: 0, to: 11, cat: '', acc: '', q: '', limit: 200 }, ui.d || {}); ui.d.limit = 200; ui.rv = Object.assign({ m: null, filter: 'all', q: '', limit: 200 }, ui.rv || {}); ui.rv.limit = 200; } catch (e) { }
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => { });
+}
+async function loadCompany(id) {
+  S = null; loadError = null; backupsCache = []; cache = {};
+  if (!id) return;
   let raw = null;
-  try { await IDB.open(); storeMode = 'idb'; raw = await IDB.get('data'); } catch (e) { storeMode = 'ls'; }
-  if (raw == null) { try { raw = localStorage.getItem(KEY); if (raw && storeMode === 'idb') migratedFromLS = true; } catch (e) { raw = null; } }
+  try { raw = await kvGet(dKey(id)); } catch (e) { raw = null; }
   if (raw) {
     try {
       const d = JSON.parse(raw);
       if (!d || !Array.isArray(d.accounts) || !Array.isArray(d.entries)) throw new Error('形式が正しくありません');
       S = migrate(d);
     } catch (e) { loadError = { message: e.message, raw }; S = null; }
-  }
-  try { backupsCache = storeMode === 'idb' ? (await IDB.get('backups')) || [] : JSON.parse(localStorage.getItem(BKEY) || '[]'); } catch (e) { backupsCache = []; }
-  if (storeMode === 'idb' && !backupsCache.length) { try { backupsCache = JSON.parse(localStorage.getItem(BKEY) || '[]'); } catch (e) { } }  // 旧保存先のバックアップも引き継ぐ
-  try { const u = JSON.parse(localStorage.getItem(UIKEY) || 'null'); if (u) ui = Object.assign(ui, u, { editId: null }); ui.d = Object.assign({ from: 0, to: 11, cat: '', acc: '', q: '', limit: 200 }, ui.d || {}); ui.d.limit = 200; ui.rv = Object.assign({ m: null, filter: 'all', q: '', limit: 200 }, ui.rv || {}); ui.rv.limit = 200; } catch (e) { }
-  if (navigator.storage?.persist) navigator.storage.persist().catch(() => { });
+  } else loadError = { message: 'この会社の保存データが見つかりません', raw: '' };
+  try { backupsCache = (await kvGetJSON(bKey(id))) || []; } catch (e) { backupsCache = []; }
 }
 async function save(msg) {
-  if (!S) return;
+  if (!S || !REG.current) return;
   cache = {};
   S.updatedAt = new Date().toISOString();
   const json = JSON.stringify(S);
   if (msg) toast(msg);
   try {
-    if (storeMode === 'idb') {
-      await IDB.set('data', json);
-      if (migratedFromLS) {   // 旧保存先は消さずに退避（読み戻して一致を確認してから）
-        const back = await IDB.get('data');
-        if (back === json) { try { localStorage.setItem(KEY + '.legacy', localStorage.getItem(KEY)); localStorage.removeItem(KEY); } catch (e) { } migratedFromLS = false; }
-      }
-    } else localStorage.setItem(KEY, json);
+    await kvSet(dKey(REG.current), json);
+    const c = REG.companies.find(x => x.id === REG.current), nm = companyName(S);
+    if (c && (c.name !== nm || c.closing !== closingMonth() || (c.founded || '') !== (S.profile?.founded || ''))) { c.name = nm; c.closing = closingMonth(); c.founded = S.profile?.founded || ''; await saveReg(); renderCoSel(); }
     setSaveState(true);
-    bc?.postMessage('saved');
+    bc?.postMessage({ type: 'saved', id: REG.current });
   } catch (e) {
     setSaveState(false);
-    toast('保存できませんでした。「設定・データ」からバックアップを書き出してください。');
+    toast('保存できませんでした。「設定」の「データ・バックアップ」からバックアップを書き出してください。');
   }
+}
+async function switchCompany(id) {
+  if (!id || id === REG.current) return;
+  if ($('#dlg').open) $('#dlg').close();
+  REG.current = id; await saveReg(); await loadCompany(id);
+  ui.fy = null; ui.m = null; ui.fin = { basis: null, m: null, avg: true }; ui.d = { from: 0, to: 11, cat: '', acc: '', q: '', limit: 200 }; ui.rv = { m: null, filter: 'all', q: '', limit: 200 }; ui.editId = null; ui.form = null; ui.kpiSel = null;
+  if (S) dailySnapshot();
+  render(); window.scrollTo(0, 0);
+  if (S) toast(`「${companyName(S)}」に切り替えました`);
+}
+async function createCompany({ name, closing, founded, copyAcc, sample, data }) {
+  const prevAcc = S && copyAcc ? S.accounts.map(a => ({ id: a.id, name: a.name, cat: a.cat, ...(a.cash != null ? { cash: a.cash } : {}) })) : null;
+  const id = 'c' + uid();
+  let st;
+  if (data) st = migrate(data);
+  else if (sample) st = createSample({ fyStart: closing % 12 + 1 });
+  else { st = emptyState(); st.settings.fyStart = closing % 12 + 1; if (prevAcc) st.accounts = prevAcc; }
+  if (!data) { st.settings.company = name; st.profile = { ...emptyProfile(), ...(st.profile || {}), short: name, founded: founded || st.profile?.founded || '' }; }
+  const json = JSON.stringify(st);
+  await kvSet(dKey(id), json); await kvSet(bKey(id), storeMode === 'idb' ? [] : '[]');
+  REG.companies.push({ id, name: companyName(st), closing: (Number(st.settings.fyStart || 4) + 10) % 12 + 1, founded: st.profile?.founded || '' });
+  await saveReg();
+  if (!sample && !data) ui.tab = 'import';   // 空の会社は、まずデータ取込から
+  await switchCompany(id);
+}
+async function trashCompany(id) {
+  const c = REG.companies.find(x => x.id === id); if (!c) return;
+  if (REG.companies.length === 1) { toast('会社が1社だけのときは削除できません。先に別の会社を追加してください。'); return; }
+  const raw = await kvGet(dKey(id));
+  if (raw) await download(`業績管理_${c.name}_削除前バックアップ_${stamp()}.json`, typeof raw === 'string' ? raw : JSON.stringify(raw), 'application/json');
+  // データ本体は消さずに残し、一覧からだけ外す（「削除した会社」から復元できる）
+  REG.companies = REG.companies.filter(x => x.id !== id);
+  REG.trash.unshift({ ...c, deletedAt: new Date().toISOString() });
+  if (REG.current === id) { REG.current = REG.companies[0].id; await saveReg(); await loadCompany(REG.current); } else await saveReg();
+  render(); toast(`「${c.name}」を一覧から削除しました（「削除した会社」から復元できます）`);
+}
+async function restoreCompany(id) {
+  const t = REG.trash.find(x => x.id === id); if (!t) return;
+  REG.trash = REG.trash.filter(x => x.id !== id);
+  const { deletedAt, ...c } = t; REG.companies.push(c);
+  await saveReg(); render(); toast(`「${c.name}」を復元しました`);
+}
+function renderCoSel() {
+  const el = $('#coSel'); if (!el) return;
+  if (!REG.companies.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = REG.companies.map(c => `<option value="${c.id}" ${c.id === REG.current ? 'selected' : ''}>${esc(c.name)}</option>`).join('')
+    + `<option disabled>──────────</option><option value="__add">＋ 会社を追加…</option><option value="__manage">会社の管理…</option>`;
+  el.value = REG.current;
+}
+function addCompanyDialog() {
+  const months = Array.from({ length: 12 }, (_, i) => i + 1);
+  openDialog('会社を追加', `
+    <div class="field"><label for="ncName">会社名（プルダウンに表示する名前）<span class="req">※必須</span></label><input type="text" id="ncName" placeholder="例：株式会社青葉商事"></div>
+    <div class="form-grid">
+      <div class="field"><label for="ncClosing">決算月<span class="req">※必須</span></label><select id="ncClosing">${months.map(m => `<option value="${m}" ${m === 3 ? 'selected' : ''}>${m}月決算（期首${m % 12 + 1}月）</option>`).join('')}</select></div>
+      <div class="field"><label for="ncFounded">設立年月日</label><input type="date" id="ncFounded"></div>
+    </div>
+    <div class="field"><span class="lbl">始め方</span>
+      <label class="row small"><input type="radio" name="ncStart" value="empty" checked class="chk"> 空の状態から（標準の勘定科目）</label>
+      ${S ? `<label class="row small"><input type="radio" name="ncStart" value="copy" class="chk"> 「${esc(companyName(S))}」の勘定科目をコピーして始める（明細・予算などはコピーしません）</label>` : ''}
+      <label class="row small"><input type="radio" name="ncStart" value="sample" class="chk"> サンプルデータ（架空の会社）で試す</label></div>
+    <p class="small muted">会社ごとにデータを分けて保存します。会社の詳しい情報（法人番号・所在地など）は、追加後に「設定」の「会社情報」で入力できます。</p>
+    <p class="err" id="ncErr" role="alert"></p>`,
+    [{ label: 'キャンセル', cls: 'text' }, { label: 'バックアップファイルから追加', cls: 'text', icon: 'upload', fn: () => { importCompanyFromFile(); } }, {
+      label: '追加する', cls: 'primary', icon: 'plus', fn: async dlg => {
+        const name = nfkc(dlg.querySelector('#ncName').value);
+        if (!name) { dlg.querySelector('#ncErr').textContent = '会社名を入力してください。'; dlg.querySelector('#ncName').focus(); return false; }
+        if (REG.companies.some(c => c.name === name)) { dlg.querySelector('#ncErr').textContent = '同じ名前の会社があります。区別できる名前にしてください。'; return false; }
+        const mode = dlg.querySelector('input[name="ncStart"]:checked').value;
+        dlg.close();
+        await createCompany({ name, closing: +dlg.querySelector('#ncClosing').value, founded: dlg.querySelector('#ncFounded').value, copyAcc: mode === 'copy', sample: mode === 'sample' });
+        return false;
+      }
+    }], dlg => dlg.querySelector('#ncName').focus());
+}
+function importCompanyFromFile() {
+  pickFile('.json,application/json', async file => {
+    let d;
+    try { d = JSON.parse(await readFileText(file)); if (!d || !Array.isArray(d.accounts) || !Array.isArray(d.entries)) throw 0; }
+    catch (e) { return toast('このファイルは業績管理のバックアップとして読み込めません。'); }
+    await createCompany({ data: d });
+    toast(`バックアップから「${companyName(S)}」を追加しました`);
+  });
 }
 function saveUi() { try { localStorage.setItem(UIKEY, JSON.stringify({ fin: ui.fin, finView: ui.finView, bep: ui.bep, tab: ui.tab, fy: ui.fy, m: ui.m, mode: ui.mode, plSeries: ui.plSeries, plChart: ui.plChart, d: ui.d, kpiSel: ui.kpiSel, rv: ui.rv })); } catch (e) { } }
 function setSaveState(ok) {
@@ -456,8 +581,9 @@ function snapshot(reason) {
   if (!S) return;
   backupsCache.unshift({ ts: new Date().toISOString(), reason, entries: S.entries.length, data: JSON.stringify(S) });
   while (backupsCache.length > 10) backupsCache.pop();
-  if (storeMode === 'idb') IDB.set('backups', backupsCache).catch(() => toast('端末内バックアップを保存できませんでした'));
-  else for (;;) { try { localStorage.setItem(BKEY, JSON.stringify(backupsCache)); break; } catch (e) { if (backupsCache.length <= 1) break; backupsCache.pop(); } }
+  if (!REG.current) return;
+  if (storeMode === 'idb') IDB.set(bKey(REG.current), backupsCache).catch(() => toast('端末内バックアップを保存できませんでした'));
+  else for (;;) { try { localStorage.setItem(bKey(REG.current), JSON.stringify(backupsCache)); break; } catch (e) { if (backupsCache.length <= 1) break; backupsCache.pop(); } }
 }
 function dailySnapshot() {
   const today = isoDate(new Date());
@@ -475,7 +601,14 @@ const mLabel = i => monthNum(i) + '月';
 const idxOfMonth = mo => (mo - fyStart() + 12) % 12;
 function yearOf(fy, i) { return fy + (fyStart() - 1 + i >= 12 ? 1 : 0); }
 function fyLabel(fy) { return fyStart() === 1 ? `${fy}年` : `${fy}年度`; }
-function fyRangeText(fy) { return `${fy}年${fyStart()}月〜${yearOf(fy, 11)}年${monthNum(11)}月`; }
+// 設立日から「第n期」を求める（設立日を含む事業年度が第1期）
+function periodNo(fy) { const f = S?.profile?.founded; if (!f || !/^\d{4}-\d{2}-\d{2}$/.test(f)) return null; const n = fy - fyIdx(f).fy + 1; return n >= 1 ? n : null; }
+function fyLabelLong(fy) { const n = periodNo(fy); return fyLabel(fy) + (n ? `・第${n}期` : ''); }
+function fyRangeText(fy) {
+  const n = periodNo(fy), f = S?.profile?.founded;
+  const start = n === 1 ? `${+f.slice(0, 4)}年${+f.slice(5, 7)}月${+f.slice(8, 10)}日` : `${fy}年${fyStart()}月${n ? '1日' : ''}`;
+  return `${n ? `第${n}期 ` : ''}${start}〜${yearOf(fy, 11)}年${monthNum(11)}月${n ? lastDay(fy, 11) + '日' : ''}`;
+}
 function monthDate(fy, i, day) { return `${yearOf(fy, i)}-${pad2(monthNum(i))}-${pad2(day)}`; }
 function lastDay(fy, i) { return new Date(yearOf(fy, i), monthNum(i), 0).getDate(); }
 const fyStartDate = fy => monthDate(fy, 0, 1);
@@ -670,7 +803,7 @@ async function download(name, text, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`; };
-function exportJson() { return download(`業績管理_バックアップ_${stamp()}.json`, JSON.stringify(S), 'application/json'); }
+function exportJson() { return download(`業績管理_${companyName(S)}_バックアップ_${stamp()}.json`, JSON.stringify(S), 'application/json'); }
 function drawIcons() { if (window.lucide) try { lucide.createIcons({ attrs: { 'aria-hidden': 'true' } }); } catch (e) { } }
 
 /* ---------- グラフ ---------- */
@@ -931,7 +1064,7 @@ function render() {
   if (!S) return renderNoData();
   const fk = document.activeElement?.dataset?.fk;
   destroyCharts();
-  $('#hdrCompany').textContent = S.settings.company || '';
+  renderCoSel();
   $('#sampleBadge').innerHTML = S.settings.sample ? `<span class="badge" title="サンプルデータ">${icon('flask-conical')}<span class="hide-sm">サンプルデータ</span><span class="sr-only sm-label">サンプルデータ</span></span>` : '';
   $('#settingsBtn').setAttribute('aria-pressed', ui.tab === 'settings');
   renderTabs(); renderToolbar();
@@ -974,7 +1107,7 @@ function renderToolbar() {
   const showMonth = !['detail', 'fin', 'cf'].includes(ui.tab) || bepView;
   tb.innerHTML = `
     <div class="field"><label for="tbFy">年度</label>
-      <select id="tbFy">${fyOptions().map(y => `<option value="${y}" ${y === ui.fy ? 'selected' : ''}>${fyLabel(y)}</option>`).join('')}</select></div>
+      <select id="tbFy">${fyOptions().map(y => `<option value="${y}" ${y === ui.fy ? 'selected' : ''}>${fyLabelLong(y)}</option>`).join('')}</select></div>
     ${showMonth ? `<div class="field"><label for="tbM">対象月</label>
       <select id="tbM">${months12().map((l, i) => `<option value="${i}" ${i === ui.m ? 'selected' : ''}>${yearOf(ui.fy, i)}年${l}${i <= last ? '' : '（実績未確定）'}</option>`).join('')}</select></div>` : ''}
     ${showMode ? `<div class="field"><span class="lbl" id="modeLbl">集計期間</span>
@@ -2994,20 +3127,53 @@ function viewSettings(main) {
     const v = bfy[a.id] || nulls();
     return `<tr class="acc"><td class="rowh">${esc(a.name)}</td>${v.map((x, i) => `<td class="num"><input class="cell" inputmode="decimal" data-fk="b:${a.id}:${i}" data-budget="${a.id}" data-i="${i}" value="${esc(plain(x))}" aria-label="${esc(a.name)} ${mLabel(i)} 予算"></td>`).join('')}<td class="num">${yen(sumN(v))}</td></tr>`;
   }).join(''); }).join('');
+  const sub = ui.setTab || 'company';
+  const P_ = S.profile || emptyProfile();
+  const curN = periodNo(ui.fy);
+  const SOFTS = ['', '弥生会計', 'マネーフォワード クラウド会計', '勘定奉行', 'freee会計', 'その他'];
+  const pf = (k, label, type = 'text', extra = '') => `<div class="field"><label for="pf_${k}">${label}</label><input type="${type}" id="pf_${k}" data-prof="${k}" value="${esc(['capital', 'employees'].includes(k) ? plain(P_[k]) : (P_[k] ?? ''))}" ${extra}></div>`;
+  const subnav = `<div class="subnav no-print" role="group" aria-label="設定の項目">${[['company', '会社情報', 'building-2'], ['companies', '会社の管理', 'building'], ['budget', '予算', 'calculator'], ['accounts', '勘定科目', 'list'], ['display', '表示・資金繰り', 'sliders-horizontal'], ['data', 'データ・バックアップ', 'database']].map(([k, l, ic]) => `<button type="button" class="chip" data-settab="${k}" aria-pressed="${sub === k}">${icon(ic)}${l}</button>`).join('')}</div>`;
   main.innerHTML = `<div class="stack">
-    <div class="card"><div class="card-hd"><h2>基本設定</h2><span class="small muted">変更は自動保存されます</span></div>
+    <div class="row"><h2 style="margin-right:auto">設定　<span class="muted" style="font-weight:400">${esc(companyName(S))}</span></h2></div>
+    ${subnav}
+    ${sub === 'company' ? `<div class="card"><div class="card-hd"><h2>会社の基本情報</h2><span class="small muted">この会社だけに保存されます（自動保存）</span></div>
       <div class="form-grid">
-        <div class="field"><label for="sCompany">会社名・部門名</label><input type="text" id="sCompany" data-set="company" value="${esc(st.company)}"></div>
-        <div class="field"><label for="sFy">期首月（決算期の始まり）</label><select id="sFy" data-set="fyStart">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === fyStart() ? 'selected' : ''}>${i + 1}月</option>`).join('')}</select></div>
-        <div class="field"><label for="sUnit">金額の表示単位</label><select id="sUnit" data-set="unit"><option value="yen" ${st.unit === 'yen' ? 'selected' : ''}>円</option><option value="k" ${st.unit === 'k' ? 'selected' : ''}>千円（千円未満四捨五入）</option></select></div>
-        <div class="field"><label for="sTax">金額の税区分（表示用）</label><select id="sTax" data-set="tax"><option ${st.tax === '税抜' ? 'selected' : ''}>税抜</option><option ${st.tax === '税込' ? 'selected' : ''}>税込</option></select></div>
-        <div class="field"><label for="sMin">資金の警戒ライン（円）</label><input type="text" inputmode="decimal" id="sMin" data-set="minCash" value="${esc(plain(st.minCash))}"></div>
-        <div class="field"><label for="sLag">売上・仕入の入出金までの月数（資金繰りの予定用）</label><select id="sLag" data-set="cashLag">${[0, 1, 2, 3].map(n => `<option value="${n}" ${Number(st.cashLag) === n ? 'selected' : ''}>${n === 0 ? '当月' : n + 'か月後'}</option>`).join('')}</select></div>
+        ${pf('short', '表示名（会社の切り替えに表示）<span class="req">※必須</span>')}
+        ${pf('name', '正式名称（商号）', 'text', 'placeholder="例：株式会社青葉商事"')}
+        ${pf('corpNo', '法人番号（13桁）', 'text', 'inputmode="numeric" maxlength="13" placeholder="例：1234567890123"')}
+        ${pf('founded', '設立年月日', 'date')}
+        <div class="field"><label for="sClosing">決算月<span class="req">※必須</span></label><select id="sClosing" data-set="closing">${Array.from({ length: 12 }, (_, i) => i + 1).map(m => `<option value="${m}" ${m === closingMonth() ? 'selected' : ''}>${m}月決算（期首${m % 12 + 1}月）</option>`).join('')}</select></div>
+        <div class="field"><label for="sTax">経理方式（消費税）</label><select id="sTax" data-set="tax"><option value="税抜" ${S.settings.tax === '税抜' ? 'selected' : ''}>税抜経理</option><option value="税込" ${S.settings.tax === '税込' ? 'selected' : ''}>税込経理</option></select></div>
+        ${pf('industry', '業種', 'text', 'placeholder="例：卸売業"')}
+        ${pf('capital', '資本金（円）', 'text', 'inputmode="decimal"')}
+        ${pf('employees', '従業員数（人）', 'text', 'inputmode="decimal"')}
+        ${pf('rep', '代表者')}
+        ${pf('address', '本店所在地')}
+        ${pf('tel', '電話番号', 'tel')}
+        <div class="field"><label for="pf_software">使用している会計ソフト</label><select id="pf_software" data-prof="software">${SOFTS.map(x => `<option value="${x}" ${x === (P_.software || '') ? 'selected' : ''}>${x || '選択してください'}</option>`).join('')}</select></div>
       </div>
-      <p class="small muted" style="margin-top:8px">期首月を変えると、明細は日付から自動で年度・月に振り分け直されます。予算・資金繰り・KPI・試算表は「年度の何か月目」で保存しているため、期首月の変更後は内容を確認してください。取込データの税込・税抜は元データの経理方式のままです。</p>
-    </div>
-
-    <div class="card"><div class="card-hd"><h2>予算入力　${fyLabel(fy)}</h2>
+      <div class="field" style="margin-top:12px"><label for="pf_memo">メモ</label><textarea id="pf_memo" data-prof="memo" rows="3">${esc(P_.memo || '')}</textarea></div>
+      <dl class="kv small" style="margin-top:12px"><dt>選択中の年度</dt><dd>${fyLabelLong(ui.fy)}（${fyRangeText(ui.fy)}）</dd><dt>期の数え方</dt><dd>${P_.founded ? '設立日を含む事業年度を第1期として数えます' : '設立年月日を入力すると「第○期」を表示します'}</dd></dl>
+      <p class="small muted" style="margin-top:8px">決算月を変えると、明細は日付から自動で年度・月に振り分け直されます。予算・資金繰り・KPI・試算表は「年度の何か月目」で保存しているため、変更後は内容を確認してください（変更前の状態は端末内バックアップに残ります）。決算期の変更（変則決算）には対応していません。</p>
+      <p class="err" id="pfErr" role="alert"></p>
+    </div>` : ''}
+    ${sub === 'companies' ? `<div class="card"><div class="card-hd"><h2>会社の管理（${REG.companies.length}社）</h2><button class="btn sm primary" data-act="addCompany">${icon('plus')}会社を追加</button><button class="btn sm" data-act="addCompanyFile">${icon('upload')}バックアップファイルから追加</button></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>会社</th><th>決算月</th><th>設立年月日</th><th>並び順</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>
+      ${REG.companies.map((c, i) => `<tr class="${c.id === REG.current ? 'selected' : ''}"><td class="rowh">${esc(c.name)}${c.id === REG.current ? ' <span class="muted small">（表示中）</span>' : ''}</td><td class="num">${c.closing ? c.closing + '月' : '—'}</td><td class="num">${c.founded ? c.founded.replaceAll('-', '/') : '—'}</td>
+        <td><button class="icon-btn" data-coup="${i}" aria-label="上へ" ${i === 0 ? 'disabled' : ''}>${icon('chevron-up')}</button><button class="icon-btn" data-codown="${i}" aria-label="下へ" ${i === REG.companies.length - 1 ? 'disabled' : ''}>${icon('chevron-down')}</button></td>
+        <td style="white-space:nowrap">${c.id === REG.current ? '' : `<button class="btn sm" data-coswitch="${c.id}">${icon('arrow-right-left')}切り替える</button>`}<button class="btn sm danger" data-codel="${c.id}" ${REG.companies.length === 1 ? 'disabled title="会社が1社だけのときは削除できません"' : ''}>${icon('trash-2')}削除</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="small muted" style="margin-top:8px">会社ごとに、明細・予算・資金繰り・取込データ・設定を別々に保存します。画面上部のプルダウンでいつでも切り替えられます。</p>
+      ${REG.trash.length ? `<h3 style="margin-top:20px">削除した会社（復元できます）</h3><div class="tbl-wrap" style="margin-top:8px"><table class="tbl"><thead><tr><th>会社</th><th>削除した日時</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>${REG.trash.map(t => `<tr><td class="rowh">${esc(t.name)}</td><td class="num">${new Date(t.deletedAt).toLocaleString('ja-JP')}</td><td><button class="btn sm" data-corestore="${t.id}">${icon('archive-restore')}復元する</button></td></tr>`).join('')}</tbody></table></div><p class="small muted" style="margin-top:6px">削除した会社のデータは、この端末に残しています。</p>` : ''}
+    </div>` : ''}
+    ${sub === 'display' ? `<div class="card"><div class="card-hd"><h2>表示・資金繰り</h2><span class="small muted">この会社の設定です（自動保存）</span></div>
+      <div class="form-grid">
+        <div class="field"><label for="sUnit">金額の表示単位</label><select id="sUnit" data-set="unit"><option value="yen" ${S.settings.unit === 'yen' ? 'selected' : ''}>円</option><option value="k" ${S.settings.unit === 'k' ? 'selected' : ''}>千円（千円未満四捨五入）</option></select></div>
+        <div class="field"><label for="sMin">資金の警戒ライン（円）</label><input type="text" inputmode="decimal" id="sMin" data-set="minCash" value="${esc(plain(S.settings.minCash))}"></div>
+        <div class="field"><label for="sLag">売上・仕入の入出金までの月数（資金繰りの予定用）</label><select id="sLag" data-set="cashLag">${[0, 1, 2, 3].map(n => `<option value="${n}" ${Number(S.settings.cashLag) === n ? 'selected' : ''}>${n === 0 ? '当月' : n + 'か月後'}</option>`).join('')}</select></div>
+      </div>
+    </div>` : ''}
+    ${sub === 'budget' ? `<div class="card"><div class="card-hd"><h2>予算入力　${fyLabel(fy)}</h2>
       <div class="field"><label for="bFy" class="sr-only">年度</label><select id="bFy">${fyOptions().map(y => `<option value="${y}" ${y === fy ? 'selected' : ''}>${fyLabel(y)}</option>`).join('')}</select></div></div>
       <div class="row" style="margin-bottom:12px">
         <label for="bPct" class="small">前年実績 ×</label><input type="text" inputmode="decimal" id="bPct" value="105" style="width:90px;text-align:right" aria-label="前年実績に掛ける割合（%）"><span class="small">%</span>
@@ -3016,9 +3182,9 @@ function viewSettings(main) {
       </div>
       <div class="tbl-wrap tall"><table class="tbl"><thead><tr><th>勘定科目</th>${months12().map(l => `<th>${l}</th>`).join('')}<th>年間合計</th></tr></thead><tbody>${budgetRows}</tbody></table></div>
       <p class="small muted" style="margin-top:8px">入力は円単位。Excelからコピーした1行分（12か月）を最初の欄に貼り付けると、横に展開されます。</p>
-    </div>
+    </div>` : ''}
 
-    <div class="card"><div class="card-hd"><h2>勘定科目</h2><button class="btn sm" data-act="addAcc">${icon('plus')}科目を追加</button></div>
+    ${sub === 'accounts' ? `<div class="card"><div class="card-hd"><h2>勘定科目</h2><button class="btn sm" data-act="addAcc">${icon('plus')}科目を追加</button></div>
       <div class="tbl-wrap tall"><table class="tbl"><thead><tr><th>科目名</th><th style="text-align:left">区分</th><th>資金</th><th>使用件数</th><th>並び順</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>
       ${S.accounts.map((a, i) => `<tr><td class="rowh"><input class="cell wide" data-fk="an:${a.id}" data-accname="${a.id}" value="${esc(a.name)}" aria-label="科目名"></td>
         <td><select data-acccat="${a.id}" aria-label="${esc(a.name)}の区分" style="min-height:40px">${CATS.map(c => `<option value="${c.id}" ${c.id === a.cat ? 'selected' : ''}>${c.label}</option>`).join('')}</select></td>
@@ -3028,10 +3194,10 @@ function viewSettings(main) {
         <td><button class="icon-btn" data-accdel="${a.id}" aria-label="${esc(a.name)}を削除" ${used[a.id] ? 'disabled title="使用中の科目は削除できません"' : ''}>${icon('trash-2')}</button></td></tr>`).join('')}
       </tbody></table></div>
       <p class="small muted" style="margin-top:8px">「資金」にチェックした貸借対照表科目（現金・普通預金・当座預金など）を、資金繰りの対象にします。使用中の科目は削除できません（データ保護のため）。</p>
-    </div>
+    </div>` : ''}
 
-    <div class="card"><div class="card-hd"><h2>データの保存・バックアップ</h2></div>
-      <div class="notice" style="margin-bottom:12px">${icon('info')}<span>データはこの端末・このブラウザの中だけに自動保存されます（${storeMode === 'idb' ? 'ブラウザ内データベース' : 'ブラウザ内ストレージ'}。サーバーには送信しません）。別の端末やブラウザとは共有されません。定期的に「バックアップを書き出す」でファイルに保存してください。</span></div>
+    ${sub === 'data' ? `<div class="card"><div class="card-hd"><h2>データの保存・バックアップ（${esc(companyName(S))}）</h2></div>
+      <div class="notice" style="margin-bottom:12px">${icon('info')}<span>データは会社ごとに、この端末・このブラウザの中だけに自動保存されます（${storeMode === 'idb' ? 'ブラウザ内データベース' : 'ブラウザ内ストレージ'}。サーバーには送信しません）。別の端末やブラウザとは共有されません。定期的に「バックアップを書き出す」でファイルに保存してください。</span></div>
       <dl class="kv small" style="margin:0 0 12px">
         <dt>明細件数</dt><dd>${S.entries.length.toLocaleString('ja-JP')}件</dd><dt>資金繰りの取込取引</dt><dd>${S.cashTx.length.toLocaleString('ja-JP')}件</dd><dt>勘定科目</dt><dd>${S.accounts.length}件</dd>
         <dt>予算のある年度</dt><dd>${Object.keys(S.budgets).map(y => fyLabel(+y)).join('、') || 'なし'}</dd>
@@ -3047,7 +3213,7 @@ function viewSettings(main) {
       </tbody></table></div>` : '<p class="small muted">まだありません。</p>'}
       ${S.settings.sample ? `<h3 style="margin-top:20px">サンプルデータ</h3><p class="small" style="margin:6px 0 8px">現在は動作確認用のサンプルデータです。本番利用を始めるときは、明細・予算・資金繰り・KPI・取込データのサンプルを削除します（勘定科目と基本設定は残します。削除前に自動でバックアップします）。</p>
         <button class="btn danger" data-act="clearSample">${icon('trash-2')}サンプルを削除して本番利用を始める</button>` : ''}
-    </div>
+    </div>` : ''}
   </div>`;
 }
 function budgetFromPrev() {
@@ -3075,6 +3241,7 @@ function budgetFromPrev() {
 /* ---------- 初回・読込エラー ---------- */
 function renderNoData() {
   $('#tabs').innerHTML = ''; $('#toolbar').innerHTML = '';
+  renderCoSel(); $('#sampleBadge').innerHTML = '';
   const main = $('#main');
   if (loadError) {
     main.innerHTML = `<div class="card stack"><h2>${icon('triangle-alert')} 保存データを読み込めませんでした</h2>
@@ -3094,8 +3261,8 @@ function renderNoData() {
     </div>
     <button class="btn text" id="startRestore">${icon('upload')}バックアップファイルから復元する</button>
   </div>`;
-  $('#startSample').onclick = () => { S = createSample(); save(); ui.fy = null; ui.m = null; render(); };
-  $('#startEmpty').onclick = () => { S = emptyState(); save(); ui.fy = null; ui.m = null; ui.tab = 'import'; render(); };
+  $('#startSample').onclick = () => createCompany({ name: 'サンプル株式会社（架空）', closing: 3, founded: '2015-06-10', sample: true });
+  $('#startEmpty').onclick = () => addCompanyDialog();
   $('#startRestore').onclick = () => importJsonFlow(true);
   drawIcons();
 }
@@ -3138,6 +3305,16 @@ document.addEventListener('click', ev => {
   }
   if (ds.kpisel) { ui.kpiSel = ds.kpisel; render(); return; }
   if (ds.finview) { ui.finView = ds.finview; render(); return; }
+  if (ds.settab) { ui.setTab = ds.settab; render(); return; }
+  if (ds.coswitch) { switchCompany(ds.coswitch); return; }
+  if (ds.corestore) { restoreCompany(ds.corestore); return; }
+  if (ds.coup || ds.codown) { const i = +(ds.coup ?? ds.codown), j = ds.coup ? i - 1 : i + 1; [REG.companies[i], REG.companies[j]] = [REG.companies[j], REG.companies[i]]; saveReg().then(() => { renderCoSel(); render(); }); return; }
+  if (ds.codel) {
+    const c = REG.companies.find(x => x.id === ds.codel); if (!c) return;
+    openDialog('会社の削除', `<p>「${esc(c.name)}」を会社の一覧から削除します。</p><p class="small">削除する前に、この会社のバックアップファイルを書き出します。データ本体はこの端末に残し、「削除した会社」からいつでも復元できます。</p>`,
+      [{ label: 'キャンセル', cls: 'text' }, { label: '削除する', cls: 'danger', fn: () => { trashCompany(c.id); } }]);
+    return;
+  }
   if (ds.unc !== undefined) { ui.tab = 'import'; ui.rv = { ...ui.rv, m: +ds.unc, filter: 'un' }; render(); window.scrollTo(0, 0); return; }
   if (ds.kind !== undefined) {
     const c = S.cash[ui.fy], i = +ds.kind, cf = cashCalc(ui.fy);
@@ -3185,6 +3362,7 @@ document.addEventListener('click', ev => {
   if (!act) return;
   const acts = {
     csvPL, csvCash, csvFin, csvCF,
+    addCompany: () => addCompanyDialog(), addCompanyFile: () => importCompanyFromFile(),
     resetVar: () => { S.varRates = {}; save('変動費の割合を標準に戻しました'); render(); },
     addSampleFin: () => { const fy = fyIdx(isoDate(new Date())).fy; snapshot('サンプルの決算書追加の前'); sampleFinance(S, fy, fyIdx(isoDate(new Date())).i - 1); ui.fin = { basis: null, m: null, avg: true }; save('サンプルの決算書・試算表を追加しました'); render(); },
     exportCsv: exportEntriesCsv, importCsv: importCsvFlow, exportJson, importJson: () => importJsonFlow(),
@@ -3257,6 +3435,17 @@ document.addEventListener('change', ev => {
   if (ds.accname) { const v = t.value.trim(); if (v) { accById(ds.accname).name = v; save(); } rerender(); return; }
   if (ds.acccat) { const a = accById(ds.acccat); a.cat = t.value; if (a.cat === 'bs' && a.cash == null) a.cash = RE.cash.test(normName(a.name)); save(); rerender(); return; }
   if (ds.acccash) { accById(ds.acccash).cash = t.checked; save('資金の対象を変更しました'); rerender(); return; }
+  if (ds.prof) {
+    let v = t.value.trim(); const k = ds.prof;
+    if (k === 'short' && !v) { toast('表示名は空にできません'); return rerender(); }
+    if (k === 'short' && REG.companies.some(c => c.id !== REG.current && c.name === v)) { toast('同じ名前の会社があります'); return rerender(); }
+    if (k === 'corpNo' && v && !/^\d{13}$/.test(nfkc(v))) { toast('法人番号は13桁の数字で入力してください'); return rerender(); }
+    if (k === 'capital' || k === 'employees') { const n = parseNum(v); if (Number.isNaN(n)) { toast('数字で入力してください'); return rerender(); } v = n; }
+    if (k === 'corpNo') v = nfkc(v);
+    S.profile[k] = v; if (k === 'short') S.settings.company = v;
+    save('保存しました'); rerender(); return;
+  }
+  if (ds.set === 'closing') { snapshot('決算月の変更前'); S.settings.fyStart = Number(t.value) % 12 + 1; ui.fy = null; ui.m = null; save('決算月を変更しました'); rerender(); return; }
   if (ds.set) {
     let v = t.value;
     if (ds.set === 'fyStart' || ds.set === 'cashLag') v = Number(v);
@@ -3310,13 +3499,15 @@ $('#themeBtn').onclick = () => {
 };
 $('#settingsBtn').onclick = () => { if (!S) return; ui.tab = ui.tab === 'settings' ? 'dash' : 'settings'; render(); window.scrollTo(0, 0); };
 let rsTimer; window.addEventListener('resize', () => { clearTimeout(rsTimer); rsTimer = setTimeout(() => S && renderTabs(), 200); });
-bc && (bc.onmessage = async () => { try { const raw = storeMode === 'idb' ? await IDB.get('data') : localStorage.getItem(KEY); if (raw) { S = migrate(JSON.parse(raw)); cache = {}; if (!$('#dlg').open) render(); } } catch (e) { } });
+bc && (bc.onmessage = async ev => { try { const r = await kvGetJSON(storeMode === 'idb' ? 'companies' : REGKEY); if (r) { REG.companies = r.companies; REG.trash = r.trash || []; } if (ev.data?.id === REG.current && !$('#dlg').open) { const raw = await kvGet(dKey(REG.current)); if (raw) { S = migrate(JSON.parse(raw)); cache = {}; render(); } } else renderCoSel(); } catch (e) { } });
 
 /* =====================================================================
  * サンプルデータ（架空の会社）
  * ===================================================================== */
-function createSample() {
+function createSample(opts = {}) {
   const st = emptyState();
+  if (opts.fyStart) st.settings.fyStart = opts.fyStart;
+  st.profile = { ...emptyProfile(), short: 'サンプル株式会社（架空）', name: 'サンプル株式会社', founded: '2015-06-10', industry: '卸売業（架空）', capital: 10000000, employees: 18, software: '弥生会計' };
   st.settings.company = 'サンプル株式会社（架空）';
   st.settings.sample = true;
   S = st; cache = {};
@@ -3497,7 +3688,8 @@ function sampleFinance(st, fy, curLast) {
 (async function init() {
   try { const th = localStorage.getItem(THEMEKEY); if (th) document.documentElement.dataset.theme = th; } catch (e) { }
   await load();
-  if (S) { dailySnapshot(); if (migratedFromLS) { snapshot('保存先の移行前'); await save(); } }
+  if (S) { dailySnapshot(); if (migratedLegacy) snapshot('複数会社対応への移行前'); }
+  $('#coSel').onchange = e => { const v = e.target.value; if (v === '__add') { renderCoSel(); addCompanyDialog(); } else if (v === '__manage') { renderCoSel(); ui.tab = 'settings'; ui.setTab = 'companies'; render(); window.scrollTo(0, 0); } else switchCompany(v); };
   render();
 })();
 </script>
