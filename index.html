@@ -1337,6 +1337,9 @@ function parseJpDate(s, o = {}) {
     const n = +m[1]; const mode = o.yy || 'auto';
     y = mode === 'west' ? 2000 + n : mode === 'heisei' ? 1988 + n : mode === 'reiwa' ? 2018 + n : (n <= reiwaNow() + 1 ? 2018 + n : 1988 + n);
     mo = +m[2]; d = +m[3]; if (o.flags) o.flags.yy = true;
+  } else if (o.excel && (m = s.match(/^(\d{5})(\.\d+)?$/)) && +m[1] > 20000 && +m[1] < 80000) {
+    const dt = new Date(Date.UTC(1970, 0, 1) + (+m[1] - 25569) * 86400000);   // Excelの日付シリアル値
+    y = dt.getUTCFullYear(); mo = dt.getUTCMonth() + 1; d = dt.getUTCDate();
   } else if ((m = s.match(/^(\d{1,2})[.\-\/月](\d{1,2})日?$/))) {
     mo = +m[1]; d = +m[2]; if (o.flags) o.flags.md = true;
     if (o.fy == null) return null;
@@ -1525,19 +1528,20 @@ function csvToTable(type, rows) {
 }
 function detectType(name, text, rows) {
   const n = nfkc(name) + ' ' + nfkc(text).slice(0, 3000) + ' ' + normName(String(text).slice(0, 3000));   // 「貸 借 対 照 表」のような字間の空白も判定
-  if (rows && rows.length && /^(2000|2100|2101|2110|2111)$/.test((rows[0][0] || '').trim()) && rows[0].length >= 15) return 'journal';
-  if (/仕訳帳|仕訳日記帳|仕訳データ/.test(n)) return 'journal';
+  if (rows && rows.length && /^(2000|2100|2101|2110|2111)$/.test(String(rows[0][0] || '').trim()) && rows[0].length >= 15) return 'journal';
+  // 1) 見出し行の形で判定（データ中の「普通預金」などの語に左右されないよう先に見る）
+  const head = (rows || []).slice(0, 15).map(r => r.map(c => nfkc(c)));
+  const rowHas = (r, re) => r.some(c => re.test(c));
+  if (head.some(r => rowHas(r, /借方(勘定)?科目/) && rowHas(r, /貸方(勘定)?科目/))) return 'journal';
+  if (head.some(r => rowHas(r, /相手/) && rowHas(r, /借方/) && rowHas(r, /貸方/))) return 'ledger';
+  if (head.some(r => r.filter(c => /^\d{1,2}月/.test(c)).length >= 2)) return 'tb';
+  if (head.some(r => rowHas(r, /借方/) && rowHas(r, /貸方/) && rowHas(r, /残高/) && rowHas(r, /科目/))) return 'tb';
+  // 2) ファイル名・表題の語で判定
+  if (/仕訳/.test(n)) return 'journal';
   if (/総勘定元帳|元帳/.test(n)) return 'ledger';
   if (/試算表|推移表/.test(n)) return 'tb';
   if (/決算書|決算報告|貸借対照表|損益計算書/.test(n)) return 'fs';
   if (/通帳|預金|入出金|取引明細|口座/.test(n)) return 'bank';
-  const head = (rows || []).slice(0, 15);
-  const sc = t => Math.max(0, ...head.map(r => headerScore(t, r)));
-  const hasDC = head.some(r => r.some(c => /借方/.test(c)) && r.some(c => /貸方/.test(c)));
-  if (hasDC && head.some(r => r.some(c => /借方(勘定)?科目/.test(c)))) return 'journal';
-  if (hasDC && head.some(r => r.some(c => /相手/.test(c)))) return 'ledger';
-  if (hasDC && head.some(r => r.some(c => /残高/.test(c)))) return 'tb';
-  if (sc('bank') >= 3) return 'bank';
   return 'bank';
 }
 function guessBankName(text, file) {
@@ -1570,7 +1574,7 @@ function parseBankTable(tbl, o) {
   if (map) {
     tbl.rows.forEach((r, ri) => {
       const ds = cellOf(r, map, 'date');
-      const date = parseJpDate(ds, { yy: o.yy, fy: o.fy, flags });
+      const date = parseJpDate(ds, { yy: o.yy, fy: o.fy, flags, excel: o.excel });
       const desc = nfkc(cellOf(r, map, 'desc'));
       const bal = parseNum(cellOf(r, map, 'bal'));
       let out = parseNum(cellOf(r, map, 'out')), inn = parseNum(cellOf(r, map, 'in'));
@@ -1596,7 +1600,7 @@ function parseBankTable(tbl, o) {
     tbl.rows.forEach((r, ri) => {
       const cells = r.map(c => nfkc(c)).filter(Boolean);
       if (!cells.length) return;
-      const date = parseJpDate(cells[0], { yy: o.yy, fy: o.fy, flags });
+      const date = parseJpDate(cells[0], { yy: o.yy, fy: o.fy, flags, excel: o.excel });
       const nums = cells.filter(isNumCell).map(parseNum);
       const txt = cells.filter(c => !isNumCell(c)).slice(date ? 1 : 0).join(' ');
       if (!date) { if (/繰越/.test(txt) && nums.length) { prev = nums[nums.length - 1]; carry = prev; } return; }
@@ -1637,7 +1641,7 @@ function parseJournalTable(tbl, o) {
   let lastDate = null, lastV = null, auto = 0;
   tbl.rows.forEach((r, ri) => {
     const ds = cellOf(r, map, 'date');
-    let date = ds ? parseJpDate(ds, { fy: o.fy, flags }) : null;
+    let date = ds ? parseJpDate(ds, { fy: o.fy, flags, excel: o.excel }) : null;
     const dacc = nfkc(cellOf(r, map, 'dacc')), cacc = nfkc(cellOf(r, map, 'cacc'));
     const damt = parseNum(cellOf(r, map, 'damt')), camt = parseNum(cellOf(r, map, 'camt'));
     const vRaw = nfkc(cellOf(r, map, 'voucher'));
@@ -1668,7 +1672,7 @@ function parseLedgerTable(tbl, o) {
     if (nonEmpty === 1 && !isNumCell(r.find(c => nfkc(c))) && !parseJpDate(r.find(c => nfkc(c)))) { curAcc = nfkc(r.find(c => nfkc(c))); return; }
     const acc = map.acc != null ? nfkc(r[map.acc]) || curAcc : curAcc;
     const ds = cellOf(r, map, 'date');
-    let date = ds ? parseJpDate(ds, { fy: o.fy, flags }) : null;
+    let date = ds ? parseJpDate(ds, { fy: o.fy, flags, excel: o.excel }) : null;
     const memo = nfkc(cellOf(r, map, 'memo')), counter = nfkc(cellOf(r, map, 'counter'));
     if (/繰越|月計|累計|合計|小計/.test(memo + counter + ds)) return;
     const debit = parseNum(cellOf(r, map, 'debit')), credit = parseNum(cellOf(r, map, 'credit'));
@@ -1813,8 +1817,18 @@ async function loadImport(P) {
     P.text = P.lines.map(l => l.cells.map(c => c.s).join(' ')).join('\n');
     P.type = P.opts.type || detectType(f.name, P.text, null);
     if (P.text.replace(/\s/g, '').length < 20) { P.needAi = true; P.status = ''; return; }   // 文字情報のないPDF（スキャン）
-  } else if (ext === 'xlsx' || ext === 'xls') {
-    throw new Error('Excelファイルは直接読み込めません。Excelで「CSV（UTF-8）」として保存してから取り込んでください。');
+  } else if (['xlsx', 'xlsm', 'xls'].includes(ext)) {
+    P.kind = 'csv'; P.xlsx = true;
+    const XL = await loadXlsx();
+    const wb = XL.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellNF: true, cellDates: false });
+    P.sheets = wb.SheetNames.filter(n => wb.Sheets[n]?.['!ref']);
+    if (!P.sheets.length) throw new Error('Excelファイルにデータのあるシートがありません。');
+    const cacheRows = {};
+    P.sheetRows = n => cacheRows[n] ||= sheetRows(XL, wb.Sheets[n]);
+    // 見出しらしい行が最も多いシートを選ぶ
+    const score = n => { const rows = P.sheetRows(n).slice(0, 15); return Math.max(0, ...Object.keys(FIELDS).flatMap(t => rows.map(r => headerScore(t, r)))) + (/^(2000|2100|2101|2110|2111)$/.test((rows[0]?.[0] || '').trim()) ? 5 : 0); };
+    P.sheet = P.sheets.reduce((b, n) => score(n) > score(b) ? n : b, P.sheets[0]);
+    useSheet(P, P.sheet);
   } else {
     P.kind = 'csv';
     P.text = await readFileText(f);
@@ -1824,16 +1838,48 @@ async function loadImport(P) {
   P.status = '';
   buildParse(P);
 }
+const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+let xlsxReady = null;
+function loadXlsx() { return xlsxReady ||= loadScript(XLSX_URL).then(() => { if (!window.XLSX) throw new Error('Excel読み取り部品を読み込めませんでした'); return window.XLSX; }).catch(e => { xlsxReady = null; throw new Error('Excel読み取り部品を読み込めませんでした（通信環境を確認するか、CSVで保存して取り込んでください）'); }); }
+// シートを文字列の表にする（日付の書式のセルは YYYY-MM-DD、数値はそのまま）
+function sheetRows(XL, ws) {
+  if (!ws || !ws['!ref']) return [];
+  const rg = XL.utils.decode_range(ws['!ref']), rows = [];
+  for (let r = rg.s.r; r <= rg.e.r; r++) {
+    const row = [];
+    for (let c = rg.s.c; c <= rg.e.c; c++) {
+      const cell = ws[XL.utils.encode_cell({ r, c })];
+      let v = '';
+      if (cell) {
+        if (cell.t === 'n' && cell.z && XL.SSF.is_date(cell.z)) { const d = XL.SSF.parse_date_code(cell.v); v = d ? `${d.y}-${pad2(d.m)}-${pad2(d.d)}` : String(cell.v); }
+        else if (cell.t === 'd' && cell.v instanceof Date) v = isoDate(cell.v);
+        else if (cell.t === 'n') v = String(cell.v);
+        else if (cell.t === 'b') v = cell.v ? 'TRUE' : 'FALSE';
+        else if (cell.t === 'e') v = '';
+        else v = String(cell.w ?? cell.v ?? '');
+      }
+      row.push(v);
+    }
+    rows.push(row);
+  }
+  return rows.filter(r => r.some(c => String(c).trim() !== ''));
+}
+function useSheet(P, name) {
+  P.sheet = name; P.csv = P.sheetRows(name);
+  P.text = name + ' ' + P.csv.slice(0, 5).map(r => r.join(' ')).join(' ');
+  P.type = detectType(P.name + ' ' + name, P.csv.slice(0, 3).map(r => r.join(' ')).join(' '), P.csv);
+}
 function baseTable(P) {
   if (P.aiTable) return P.aiTable;
   if (P.kind === 'csv') {
-    if (P.type === 'journal' && /^(2000|2100|2101|2110|2111)$/.test((P.csv[0]?.[0] || '').trim()) && P.csv[0].length >= 15) return yayoiTable(P.csv);
+    if (P.type === 'journal' && /^(2000|2100|2101|2110|2111)$/.test(String(P.csv[0]?.[0] || '').trim()) && P.csv[0].length >= 15) return yayoiTable(P.csv);
     return csvToTable(P.type, P.csv);
   }
   return linesToTable(P.type, P.lines);
 }
 function buildParse(P) {
   const o = P.opts;
+  o.excel = !!P.xlsx;
   P.tbl = baseTable(P);
   P.res = null;
   if (o.fy == null) {
@@ -1921,6 +1967,7 @@ function renderImport(P) {
   d.querySelector('#ipType')?.addEventListener('change', e => { P.type = e.target.value; P.opts = { fy: null }; P.amap = {}; P.aiTable = null; P.aiItems = null; if (P.needAi && !P.lines?.length && P.kind !== 'csv') { renderImport(P); return; } reparse(); });
   for (const el of $$('[data-opt]', d)) el.addEventListener('change', () => {
     const k = el.dataset.opt; let v = el.type === 'checkbox' ? el.checked : el.value;
+    if (k === 'sheet') { useSheet(P, v); P.opts = { fy: null }; P.amap = {}; reparse(); return; }
     if (['fy', 'm'].includes(k)) v = +v;
     if (k === 'cum' || k === 'unitK') v = v === true || v === 'true' || v === '1';
     P.opts[k] = v;
@@ -2027,7 +2074,9 @@ function previewBody(P, typeSel) {
     ${unknown.map(([n, m]) => `<tr><td class="rowh">${esc(n)}</td><td><select data-amap="${esc(n)}" aria-label="${esc(n)}の区分" style="min-height:40px">${catOpts(m.cat)}</select></td></tr>`).join('')}
     </tbody></table></div><p class="small muted">合計・利益の行は「取り込まない」にしてください（自動で判定済み）。現金・預金の科目は資金繰りに使います。</p></details>` : '';
   const errHtml = r.errors?.length ? `<details><summary>${icon('triangle-alert')}読み取れない行（${r.errors.length}件）</summary><ul class="small">${r.errors.slice(0, 40).map(e => `<li>${e}</li>`).join('')}</ul></details>` : '';
-  return `<div class="form-grid">${typeSel}${opts}</div>
+  const sheetSel = P.sheets?.length > 1 ? `<div class="field"><label for="ipSheet">シート</label><select id="ipSheet" data-opt="sheet">${P.sheets.map(n => `<option ${n === P.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>` : '';
+  return `<div class="form-grid">${typeSel}${sheetSel}${opts}</div>
+    ${P.xlsx ? `<p class="small muted">Excelファイル${P.sheets.length > 1 ? `（${P.sheets.length}シート。「${esc(P.sheet)}」を読み取りました）` : ''}から読み取りました。</p>` : ''}
     ${P.kind === 'pdf' && !P.ai ? `<p class="small muted">PDFの文字情報から読み取りました。</p>` : ''}
     ${warns.map(w => `<div class="notice warn">${icon('triangle-alert')}<span>${w}</span></div>`).join('')}
     ${summary}${colMapUi(P)}${amapHtml}${errHtml}
@@ -2216,7 +2265,7 @@ function viewImport(main) {
       <div class="card-hd"><h2>データを取り込む</h2></div>
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="ファイルを選んで取り込む">
         ${icon('upload')}<p><strong>ファイルを選ぶ</strong>、またはここにドラッグ＆ドロップ</p>
-        <p class="small muted">預金明細（CSV・PDF）／通帳PDF・写真／仕訳帳／総勘定元帳／試算表・推移表／決算書（CSV・PDF）。複数ファイルをまとめて選べます。</p>
+        <p class="small muted">預金明細（CSV・Excel・PDF）／通帳PDF・写真／仕訳帳・仕訳日記帳／総勘定元帳／試算表・推移表／決算書（CSV・Excel・PDF）。複数ファイルをまとめて選べます。</p>
       </div>
       <div class="grid g-kpi small" style="margin-top:12px">
         <div><strong>${icon('landmark')} 預金明細・通帳</strong><p class="muted">資金繰りの実績（入出金）と残高の照合に使います。摘要から自動で分類し、分類を直すと次回から覚えます。</p></div>
