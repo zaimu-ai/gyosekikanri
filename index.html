@@ -186,6 +186,7 @@ dialog .dlg-hd,dialog .dlg-ft{flex:none}
 .kvline{display:flex;justify-content:space-between;gap:12px;font-size:14px;line-height:1.5}
 .kvline>span:first-child{color:var(--text-3)}
 .chk{width:22px;height:22px;accent-color:var(--primary);flex:none}
+.chk-hit{display:inline-flex;align-items:center;justify-content:center;min-width:48px;min-height:48px;cursor:pointer}
 .dropzone{border:2px dashed var(--border-strong);border-radius:12px;padding:24px 16px;text-align:center;cursor:pointer;background:var(--surface-2);display:flex;flex-direction:column;align-items:center;gap:6px}
 .dropzone:hover,.dropzone.over{border-color:var(--primary);background:var(--primary-weak)}
 .dropzone .lucide{width:32px;height:32px;color:var(--primary)}
@@ -2528,6 +2529,7 @@ function finCtx(fy, basis, m, avgMode) {
     if (last < m) ctx.notes.push(`損益の実績は${last >= 0 ? mLabel(last) : '未登録'}までです。`);
     if (m < 11) ctx.notes.push(`期中のため、損益・キャッシュフローは12か月分に年換算して比率を計算しています（×12/${m + 1}）。`);
     ctx.notes.push('試算表の純資産は、当期の損益を含めるため「資産合計−負債合計」で求めています。');
+    if (!ctx.pl.ctax && ctx.pl.pre > 0) ctx.notes.push('当期の法人税等がまだ計上されていないため、当期純利益（自己資本純利益率など）は税引前の金額で計算しています。');
   }
   ctx.avg = !!(avgMode && ctx.B0);
   if (!ctx.pl.any) ctx.notes.push('損益の数値がありません（決算書の損益計算書、または損益の実績を取り込んでください）。');
@@ -2641,7 +2643,8 @@ function viewFin(main) {
       <p>財務分析には、貸借対照表の数値が必要です。「データ取込」で、${fyLabel(fy)}の<strong>決算書</strong>（貸借対照表・損益計算書）か、<strong>試算表</strong>（貸借対照表の科目を含むもの）を取り込んでください。</p>
       <p class="small muted">キャッシュ・フロー計算書と、営業キャッシュ・フローを使う指標には、期首の貸借対照表（前期の決算書、または期首残高のある試算表）も必要です。</p>
       ${oldFs.length ? `<div class="notice warn">${icon('triangle-alert')}<span>${oldFs.join('、')}の決算書は、貸借対照表を保存する前の版で取り込まれています。お手数ですが、もう一度取り込んでください。</span></div>` : ''}
-      <div class="row"><button class="btn primary" data-go="import">${icon('file-input')}データ取込へ</button></div></div></div>`;
+      <div class="row"><button class="btn primary" data-go="import">${icon('file-input')}データ取込へ</button>${S.settings.sample ? `<button class="btn" data-act="addSampleFin">${icon('flask-conical')}サンプルの決算書・試算表を追加</button>` : ''}</div>
+      ${S.settings.sample ? '<p class="small muted">サンプルデータを以前の版で作成した場合は「サンプルの決算書・試算表を追加」で、架空の決算書（前期・前々期）と当期の試算表を追加できます。既存のデータは変更しません。</p>' : ''}</div></div>`;
     return;
   }
   const I = finIndicators(ctx);
@@ -2737,7 +2740,7 @@ function viewSettings(main) {
       <div class="tbl-wrap tall"><table class="tbl"><thead><tr><th>科目名</th><th style="text-align:left">区分</th><th>資金</th><th>使用件数</th><th>並び順</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>
       ${S.accounts.map((a, i) => `<tr><td class="rowh"><input class="cell wide" data-fk="an:${a.id}" data-accname="${a.id}" value="${esc(a.name)}" aria-label="科目名"></td>
         <td><select data-acccat="${a.id}" aria-label="${esc(a.name)}の区分" style="min-height:40px">${CATS.map(c => `<option value="${c.id}" ${c.id === a.cat ? 'selected' : ''}>${c.label}</option>`).join('')}</select></td>
-        <td>${a.cat === 'bs' ? `<input type="checkbox" class="chk" data-acccash="${a.id}" ${a.cash ? 'checked' : ''} aria-label="${esc(a.name)}を資金（現金・預金）として扱う">` : ''}</td>
+        <td>${a.cat === 'bs' ? `<label class="chk-hit"><input type="checkbox" class="chk" data-acccash="${a.id}" ${a.cash ? 'checked' : ''} aria-label="${esc(a.name)}を資金（現金・預金）として扱う"></label>` : ''}</td>
         <td class="num">${(used[a.id] || 0).toLocaleString('ja-JP')}</td>
         <td><button class="icon-btn" data-accup="${i}" aria-label="上へ" ${i === 0 ? 'disabled' : ''}>${icon('chevron-up')}</button><button class="icon-btn" data-accdown="${i}" aria-label="下へ" ${i === S.accounts.length - 1 ? 'disabled' : ''}>${icon('chevron-down')}</button></td>
         <td><button class="icon-btn" data-accdel="${a.id}" aria-label="${esc(a.name)}を削除" ${used[a.id] ? 'disabled title="使用中の科目は削除できません"' : ''}>${icon('trash-2')}</button></td></tr>`).join('')}
@@ -2899,6 +2902,7 @@ document.addEventListener('click', ev => {
   if (!act) return;
   const acts = {
     csvPL, csvCash, csvFin,
+    addSampleFin: () => { const fy = fyIdx(isoDate(new Date())).fy; snapshot('サンプルの決算書追加の前'); sampleFinance(S, fy, fyIdx(isoDate(new Date())).i - 1); ui.fin = { basis: null, m: null, avg: true }; save('サンプルの決算書・試算表を追加しました'); render(); },
     exportCsv: exportEntriesCsv, importCsv: importCsvFlow, exportJson, importJson: () => importJsonFlow(),
     cancelEdit: () => { ui.editId = null; render(); },
     clearFilter: () => { ui.d = { from: 0, to: 11, cat: '', acc: '', q: '', limit: 200 }; render(); },
@@ -3141,8 +3145,66 @@ function createSample() {
   kp('成約率', '%', 'avg', 'up', 32, .15, true);
   kp('クレーム件数', '件', 'sum', 'down', 3, .8);
   for (const y of [fy - 1, fy]) st.kpis[4].data[y].t = st.kpis[4].data[y].t.map(v => Math.max(1, Math.round(v * .7)));
+  sampleFinance(st, fy, curLast);
   return st;
 }
+// サンプル用の決算書（前期・前々期）と当期の月次試算表（貸借対照表）。すべて架空の数値。
+// 前期末の現金及び預金はサンプル通帳の期首残高と一致させ、純資産は損益と整合させています。
+function sampleFinance(st, fy, curLast) {
+  cache = {};
+  const sumO = o => Object.values(o).reduce((s, v) => s + v, 0);
+  const r1k = v => Math.round(v / 1000) * 1000;
+  const ctaxAcc = ensureAccount('法人税、住民税及び事業税', 'ctax');
+  const pl1 = {};
+  for (const a of st.accounts.filter(isPL)) { const v = sumN(actualLine(fy - 1, a.id)); if (v) pl1[a.id] = v; }
+  const f1 = plFig(id => pl1[id] ?? null);
+  const ctax1 = r1k(Math.max(0, f1.pre) * 0.3); pl1[ctaxAcc.id] = ctax1;
+  const net1 = f1.pre - ctax1;
+  const pl2 = Object.fromEntries(Object.entries(pl1).map(([k, v]) => [k, r1k(v * 0.95)]));
+  const mSum = (y, i, cat) => st.accounts.filter(a => a.cat === cat).reduce((s, a) => s + (actualLine(y, a.id)[i] || 0), 0);
+  const ar1 = mSum(fy - 1, 11, 'sales'), ap1 = mSum(fy - 1, 11, 'cogs');
+  const CAk = ['現金及び預金', '売掛金', '商品', '前払費用'], TGk = ['建物', '車両運搬具', '工具器具備品', '土地'], IGk = ['ソフトウェア'], IVk = ['投資有価証券', '敷金'];
+  const CLk = ['買掛金', '短期借入金', '1年以内返済予定の長期借入金', '未払金', '未払法人税等', '預り金', '未払消費税等'], FLk = ['長期借入金', '退職給付引当金'];
+  const items = (A, L, E) => {
+    const s = ks => ks.reduce((t, k) => t + (A[k] ?? L[k] ?? 0), 0);
+    const CA = s(CAk), TG = s(TGk), IG = s(IGk), IV = s(IVk), CL = s(CLk), FL = s(FLk), EQ = sumO(E);
+    return [...CAk.map(k => ({ name: k, amount: A[k] })), { name: '流動資産合計', amount: CA }, ...TGk.map(k => ({ name: k, amount: A[k] })), { name: '有形固定資産合計', amount: TG },
+      ...IGk.map(k => ({ name: k, amount: A[k] })), ...IVk.map(k => ({ name: k, amount: A[k] })), { name: '投資その他の資産合計', amount: IV }, { name: '固定資産合計', amount: TG + IG + IV }, { name: '資産合計', amount: CA + TG + IG + IV },
+      ...CLk.map(k => ({ name: k, amount: L[k] })), { name: '流動負債合計', amount: CL }, ...FLk.map(k => ({ name: k, amount: L[k] })), { name: '固定負債合計', amount: FL }, { name: '負債合計', amount: CL + FL },
+      ...Object.entries(E).map(([k, v]) => ({ name: k, amount: v })), { name: '純資産合計', amount: EQ }, { name: '負債純資産合計', amount: CL + FL + EQ }];
+  };
+  const A1 = { 現金及び預金: 25000000, 売掛金: ar1, 商品: 3000000, 前払費用: 600000, 建物: 30000000, 車両運搬具: 4000000, 工具器具備品: 2000000, 土地: 15000000, ソフトウェア: 1200000, 投資有価証券: 1000000, 敷金: 2700000 };
+  const L1 = { 買掛金: ap1, 短期借入金: 5000000, '1年以内返済予定の長期借入金': 3600000, 未払金: 2000000, 未払法人税等: r1k(ctax1 * 0.6), 預り金: 800000, 未払消費税等: 1500000, 長期借入金: 40000000, 退職給付引当金: 3000000 };
+  const re1 = sumO(A1) - sumO(L1) - 10000000;
+  const E1 = { 資本金: 10000000, 繰越利益剰余金: re1 };
+  const L0 = { 買掛金: Math.round(ap1 * 0.95), 短期借入金: 4000000, '1年以内返済予定の長期借入金': 3600000, 未払金: 1800000, 未払法人税等: r1k(ctax1 * 0.5), 預り金: 750000, 未払消費税等: 1300000, 長期借入金: 43600000, 退職給付引当金: 2700000 };
+  const E0 = { 資本金: 10000000, 繰越利益剰余金: re1 - net1 };
+  const A0nc = { 売掛金: Math.round(ar1 * 0.95), 商品: 2800000, 前払費用: 550000, 建物: 31000000, 車両運搬具: 4500000, 工具器具備品: 1500000, 土地: 15000000, ソフトウェア: 1400000, 投資有価証券: 1000000, 敷金: 2700000 };
+  const A0 = { 現金及び預金: sumO(L0) + sumO(E0) - sumO(A0nc), ...A0nc };
+  const file = 'サンプル決算書（架空）';
+  // 既にある決算書・試算表は上書きしない
+  if (!st.annual[fy - 2]) st.annual[fy - 2] = { pl: pl2, cashBS: A0['現金及び預金'], src: 'sample', file, bsItems: items(A0, L0, E0), items: [] };
+  if (!st.annual[fy - 1]) st.annual[fy - 1] = { pl: pl1, cashBS: A1['現金及び預金'], src: 'sample', file, bsItems: items(A1, L1, E1), items: [] };
+  // 当期の月次試算表（直近の月末・貸借対照表のみ）
+  if (curLast >= 0 && !st.tb?.[fy]?.[curLast]) {
+    const end = monthDate(fy, curLast, lastDay(fy, curLast));
+    const bt = st.cashTx.filter(t => t.st === 'bank' && t.date <= end && t.bal != null).sort((a, b) => a.date.localeCompare(b.date) || (a.seq || 0) - (b.seq || 0));
+    const n = curLast + 1;
+    const A = { ...A1, 現金及び預金: bt.length ? bt[bt.length - 1].bal : A1['現金及び預金'], 売掛金: mSum(fy, curLast, 'sales'),
+      建物: A1['建物'] - 120000 * n, 車両運搬具: A1['車両運搬具'] - 50000 * n + (curLast >= 3 ? 4500000 : 0), 工具器具備品: A1['工具器具備品'] - 20000 * n, ソフトウェア: A1['ソフトウェア'] - 10000 * n };
+    const L = { ...L1, 買掛金: mSum(fy, curLast, 'cogs'), 長期借入金: L1['長期借入金'] - 300000 * n + (curLast >= 5 ? 10000000 : 0) };
+    const netCum = plFig(id => sumN(actualLine(fy, id).slice(0, n))).net;
+    L['未払金'] = 0; L['未払金'] = sumO(A) - (10000000 + re1 + netCum) - sumO(L);   // 差引（純資産が損益と一致するように）
+    const rows = [];
+    for (const [k, v] of [...Object.entries(A), ...Object.entries(L), ['資本金', 10000000], ['繰越利益剰余金', re1]]) {
+      const a = ensureAccount(k, 'bs'); if (k === '現金及び預金') a.cash = true;
+      rows.push({ acc: a.id, open: null, debit: null, credit: null, close: v });
+    }
+    (st.tb[fy] ||= {})[curLast] = { rows, period: 'month', src: 'sample' };
+  }
+  cache = {};
+}
+
 
 /* ---------- 起動 ---------- */
 (async function init() {
