@@ -373,7 +373,7 @@ function defaultAccounts() {
 function migrate(d) {
   const e = emptyState();
   d.settings = Object.assign(e.settings, d.settings || {});
-  for (const k of ['budgets', 'cash', 'tb', 'annual', 'counterRules', 'bsGroups', 'varRates']) d[k] = d[k] || {};
+  for (const k of ['budgets', 'cash', 'tb', 'annual', 'counterRules', 'bsGroups', 'varRates', 'codeMap']) d[k] = d[k] || {};
   for (const k of ['kpis', 'cashTx', 'banks', 'imports', 'rules', 'entries', 'accounts']) d[k] = d[k] || [];
   // 資金繰り表の項目にキーを付与（旧版は名称のみ）
   for (const c of Object.values(d.cash)) {
@@ -1328,7 +1328,7 @@ function parseJpDate(s, o = {}) {
   s = nfkc(s).replace(/\s+/g, '');
   if (!s) return null;
   let y, mo, d, m;
-  if ((m = s.match(/^(令和|平成|昭和|R|H|S)(\d{1,2}|元)[年.\-\/](\d{1,2})[月.\-\/](\d{1,2})日?/i))) {
+  if ((m = s.match(/^(令和|平成|昭和|R|H|S)\.?(\d{1,2}|元)[年.\-\/](\d{1,2})[月.\-\/](\d{1,2})日?/i))) {
     const n = m[2] === '元' ? 1 : +m[2], e = m[1].toUpperCase();
     y = (e === '令和' || e === 'R') ? 2018 + n : (e === '平成' || e === 'H') ? 1988 + n : 1925 + n; mo = +m[3]; d = +m[4];
   } else if ((m = s.match(/^(\d{4})[年.\-\/](\d{1,2})[月.\-\/](\d{1,2})日?/))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
@@ -1473,7 +1473,7 @@ async function pdfLines(doc) {
 // 見出し語（種類ごと）
 const FIELDS = {
   bank: [['date', '日付', /日付|取引日|年月日|お取引日|日時|^日$/], ['desc', '摘要', /摘要|内容|お取引内容|取引名|お取引|備考|メモ|お客様メモ/], ['bal', '残高', /残高/], ['out', '出金', /^(?!.*区分).*(出金|支払|引出|払出|払戻)/], ['in', '入金', /^(?!.*区分).*(入金|預入|預り|受入|お預)/], ['amount', '金額（符号付き）', /^金額|取引金額/], ['inout', '入出金区分', /入出金区分|^区分$|入出/]],
-  journal: [['date', '日付', /日付|取引日|伝票日付|発生日|計上日|取引日付/], ['voucher', '伝票番号', /伝票(No|番号)|取引No|仕訳番号|伝票No|^No\.?$|^番号$/i], ['dacc', '借方科目', /借方(勘定)?科目/], ['dsub', '借方補助', /借方補助/], ['dpartner', '借方取引先', /借方取引先/], ['damt', '借方金額', /借方金額|^借方$/], ['cacc', '貸方科目', /貸方(勘定)?科目/], ['csub', '貸方補助', /貸方補助/], ['cpartner', '貸方取引先', /貸方取引先/], ['camt', '貸方金額', /貸方金額|^貸方$/], ['memo', '摘要', /摘要|備考|メモ/]],
+  journal: [['sep', '伝票区切（*で新しい伝票）', /^(伝票区切|区切|OBCD001|GL0010000)$/i], ['date', '日付', /日付|取引日|伝票日付|発生日|計上日|取引日付|^CSJS005$|^GL0010001$/i], ['voucher', '伝票番号', /伝票(No|番号)|取引No|仕訳番号|伝票No|^No\.?$|^番号$/i], ['dacc', '借方科目', /借方(勘定)?科目(名|名称)?(コード)?$|^CSJS201$/i], ['dsub', '借方補助', /借方補助(科目)?(名|名称)?(コード)?$|^CSJS202$/i], ['dpartner', '借方取引先', /借方取引先(名|名称)?(コード)?$|^CSJS208$/i], ['damt', '借方金額', /借方金額|^借方$|借方本体金額|^CSJS213$/i], ['cacc', '貸方科目', /貸方(勘定)?科目(名|名称)?(コード)?$|^CSJS301$/i], ['csub', '貸方補助', /貸方補助(科目)?(名|名称)?(コード)?$|^CSJS302$/i], ['cpartner', '貸方取引先', /貸方取引先(名|名称)?(コード)?$|^CSJS308$/i], ['camt', '貸方金額', /貸方金額|^貸方$|貸方本体金額|^CSJS313$/i], ['dtax', '借方税額', /借方(消費)?税(金)?額/], ['ctax', '貸方税額', /貸方(消費)?税(金)?額/], ['memo', '摘要', /摘要|備考|メモ|^CSJS100$/i]],
   ledger: [['acc', '勘定科目', /^勘定科目$|^科目$|^勘定科目名$/], ['date', '日付', /日付|取引日|伝票日付|月日/], ['counter', '相手科目', /相手(勘定)?科目/], ['partner', '取引先', /取引先|補助/], ['memo', '摘要', /摘要|備考/], ['debit', '借方', /借方/], ['credit', '貸方', /貸方/], ['bal', '残高', /残高/]],
   tb: [['acc', '勘定科目', /勘定科目|科目名|^科目$/], ['open', '前月・期首残高', /前月繰越|前期繰越|期首残高|前月残高|繰越残高|開始残高|前残/], ['dbal', '借方残高', /借方残高/], ['cbal', '貸方残高', /貸方残高/], ['debit', '借方（当期発生）', /借方/], ['credit', '貸方（当期発生）', /貸方/], ['close', '当月・期末残高', /当月残高|期末残高|当期残高|月末残高|^残高$|残高$/]],
 };
@@ -1485,8 +1485,11 @@ function headerScore(type, cells) {
 }
 function mapHeaders(type, headers) {
   const used = new Set(), map = {};
+  const isCode = h => /コード|CSJS2(01|02|08)|CSJS3(01|02|08)/i.test(nfkc(h));
   for (const [k, , re] of FIELDS[type]) {
-    const i = headers.findIndex((h, j) => !used.has(j) && re.test(nfkc(h)));
+    // 「借方勘定科目コード」と「借方勘定科目」が両方ある場合（マネーフォワード）は名前の列を使う
+    let i = headers.findIndex((h, j) => !used.has(j) && re.test(nfkc(h)) && !isCode(h));
+    if (i < 0) i = headers.findIndex((h, j) => !used.has(j) && re.test(nfkc(h)));
     if (i >= 0) { map[k] = i; used.add(i); }
   }
   if (type === 'tb' && map.dbal != null && map.cbal != null) { delete map.debit; delete map.credit; }
@@ -1533,6 +1536,7 @@ function detectType(name, text, rows) {
   const head = (rows || []).slice(0, 15).map(r => r.map(c => nfkc(c)));
   const rowHas = (r, re) => r.some(c => re.test(c));
   if (head.some(r => rowHas(r, /借方(勘定)?科目/) && rowHas(r, /貸方(勘定)?科目/))) return 'journal';
+  if (head.some(r => rowHas(r, /^(CSJS201|OBCD001)$/i) || (rowHas(r, /借方本体金額/) && rowHas(r, /貸方本体金額/)))) return 'journal';   // 勘定奉行
   if (head.some(r => rowHas(r, /相手/) && rowHas(r, /借方/) && rowHas(r, /貸方/))) return 'ledger';
   if (head.some(r => r.filter(c => /^\d{1,2}月/.test(c)).length >= 2)) return 'tb';
   if (head.some(r => rowHas(r, /借方/) && rowHas(r, /貸方/) && rowHas(r, /残高/) && rowHas(r, /科目/))) return 'tb';
@@ -1630,19 +1634,34 @@ function yayoiTable(rows) {
     const f = (r[0] || '').trim();
     if (f === '2110' || f === '2000' || f === '2111' || !cur) { g++; cur = 'Y' + g; }
     const rr = r.slice(0, 17); rr[1] = cur;
-    if (f === '2101' || f === '2000') cur = null;
+    if (f === '2101' || f === '2000' || f === '2111') cur = null;   // 2111＝1行の伝票（弥生インポート形式）
     return rr;
   });
   return { headers, rows: out };
 }
+const SOFT_LABEL = { yayoi: '弥生会計（弥生インポート形式）', mf: 'マネーフォワード クラウド会計', bugyo: '勘定奉行（OBC受入形式）' };
+function detectSoft(tbl) {
+  const h = (tbl?.headers || []).map(x => nfkc(x));
+  if (h[0] === '識別フラグ') return 'yayoi';
+  if (h.some(x => /^(OBCD001|CSJS\d{3}|GL\d{7})$/i.test(x) || x === '伝票区切' || /本体金額/.test(x))) return 'bugyo';
+  if (h.includes('取引No') && h.some(x => /^借方金額\(円\)$/.test(x))) return 'mf';
+  return null;
+}
+// 損益に使う金額の既定：マネーフォワードは税込経理の年度に税額列が出力されるため「税込」。それ以外は設定の税区分に合わせる
+const taxDefault = P => P.opts.taxNet ?? (P.soft === 'mf' ? 'gross' : (S.settings.tax === '税抜' ? 'net' : 'gross'));
 function parseJournalTable(tbl, o) {
   const map = o.map || mapHeaders('journal', tbl.headers || []);
   const lines = [], errors = []; const flags = {};
   let lastDate = null, lastV = null, auto = 0;
+  // 勘定科目がコードだけの場合（勘定奉行など）：覚えた名前か、入力された名前に置き換える
+  const hd = k => nfkc(tbl.headers?.[map[k]] || '');
+  const codeAcc = map.dacc != null && /コード|CSJS201/i.test(hd('dacc'));
+  const codes = new Set();
+  const nameOf = c => { if (!codeAcc || !c) return c; codes.add(c); return nfkc(o.codeNames?.[c] || S.codeMap?.[(o.soft || 'code') + ':' + c] || '') || `科目コード${c}`; };
   tbl.rows.forEach((r, ri) => {
     const ds = cellOf(r, map, 'date');
     let date = ds ? parseJpDate(ds, { fy: o.fy, flags, excel: o.excel }) : null;
-    const dacc = nfkc(cellOf(r, map, 'dacc')), cacc = nfkc(cellOf(r, map, 'cacc'));
+    const dacc = nameOf(nfkc(cellOf(r, map, 'dacc'))), cacc = nameOf(nfkc(cellOf(r, map, 'cacc')));
     const damt = parseNum(cellOf(r, map, 'damt')), camt = parseNum(cellOf(r, map, 'camt'));
     const vRaw = nfkc(cellOf(r, map, 'voucher'));
     if (!dacc && !cacc) { if (r.some(c => isNumCell(c)) && !/合計|計/.test(r.join(''))) errors.push(`${ri + 1}行目：勘定科目がありません`); return; }
@@ -1650,13 +1669,15 @@ function parseJournalTable(tbl, o) {
     if (!date) { if (ds) { errors.push(`${ri + 1}行目：日付が読めません`); return; } date = lastDate; }
     if (!date) { errors.push(`${ri + 1}行目：日付がありません`); return; }
     let v = vRaw ? date + '#' + vRaw : null;
+    if (map.sep != null) { const sp = nfkc(cellOf(r, map, 'sep')); v = (sp === '*' || !lastV) ? date + '#s' + (++auto) : lastV; }   // 勘定奉行：「*」の行から新しい伝票
     if (!v) v = (!ds && lastV) ? lastV : date + '#auto' + (++auto);   // 日付が空の行＝前の仕訳の続き（複合仕訳）
     const dsub = nfkc(cellOf(r, map, 'dsub')), csub = nfkc(cellOf(r, map, 'csub'));
-    lines.push({ date, v, dacc: dacc && !Number.isNaN(damt) ? dacc : '', damt: Number.isNaN(damt) ? null : damt, cacc: cacc && !Number.isNaN(camt) ? cacc : '', camt: Number.isNaN(camt) ? null : camt, memo: nfkc(cellOf(r, map, 'memo')), dp: nfkc(cellOf(r, map, 'dpartner')) || dsub, cp: nfkc(cellOf(r, map, 'cpartner')) || csub });
+    const tx = k => { const t = parseNum(cellOf(r, map, k)); return t == null || Number.isNaN(t) ? 0 : t; };
+    lines.push({ date, v, dacc: dacc && !Number.isNaN(damt) ? dacc : '', damt: Number.isNaN(damt) ? null : damt, cacc: cacc && !Number.isNaN(camt) ? cacc : '', camt: Number.isNaN(camt) ? null : camt, dtx: tx('dtax'), ctx: tx('ctax'), memo: nfkc(cellOf(r, map, 'memo')), dp: nfkc(cellOf(r, map, 'dpartner')) || dsub, cp: nfkc(cellOf(r, map, 'cpartner')) || csub });
     lastDate = date; lastV = v;
   });
-  let dsum = 0, csum = 0; for (const l of lines) { if (l.dacc) dsum += l.damt || 0; if (l.cacc) csum += l.camt || 0; }
-  return { lines, errors, flags, map, check: { dsum, csum } };
+  let dsum = 0, csum = 0, taxN = 0; for (const l of lines) { if (l.dacc) dsum += l.damt || 0; if (l.cacc) csum += l.camt || 0; if (l.dtx || l.ctx) taxN++; }
+  return { lines, errors, flags, map, check: { dsum, csum, taxN }, codes: codeAcc ? [...codes] : null };
 }
 function parseLedgerTable(tbl, o) {
   const map = o.map || mapHeaders('ledger', tbl.headers || []);
@@ -1901,7 +1922,7 @@ function buildParse(P) {
       const ex = S.banks.find(b => b.name === g);
       o.bankId = ex ? ex.id : '__new'; o.bankName = ex ? '' : g;
     }
-  } else if (P.type === 'journal') P.res = parseJournalTable(P.tbl, o);
+  } else if (P.type === 'journal') { P.soft = detectSoft(P.tbl); o.soft = P.soft; o.codeNames ||= {}; P.res = parseJournalTable(P.tbl, o); }
   else if (P.type === 'ledger') P.res = parseLedgerTable(P.tbl, o);
   else if (P.type === 'tb') P.res = parseTbTable(P.tbl, o);
   else if (P.type === 'fs') {
@@ -1975,6 +1996,7 @@ function renderImport(P) {
     reparse();
   });
   for (const el of $$('[data-colmap]', d)) el.addEventListener('change', () => { P.opts.map = { ...(P.res.map || {}) }; const k = el.dataset.colmap; if (el.value === '') delete P.opts.map[k]; else P.opts.map[k] = +el.value; reparse(); });
+  for (const el of $$('[data-codename]', d)) el.addEventListener('change', () => { (P.opts.codeNames ||= {})[el.dataset.codename] = nfkc(el.value); reparse(); });
   for (const el of $$('[data-amap]', d)) el.addEventListener('change', () => { const n = el.dataset.amap; P.amap[n] = { ...P.amap[n], cat: el.value }; renderImport(P); });
   // AI読み取りボタン（使える環境だけ表示）
   const aiBtn = d.querySelector('#ipAi');
@@ -2035,7 +2057,15 @@ function previewBody(P, typeSel) {
     if (manualOverlap) warns.push(`同じ月に手入力・簡易CSV・サンプルの明細が${manualOverlap}件あります。仕訳帳と同じ取引なら二重計上になるため、取込後に明細画面で削除してください。`);
     const ex = S.imports.filter(b => b.type === 'journal' && b.months?.some(m => months.includes(m)));
     if (ex.length) warns.push(`同じ月の仕訳帳を取込済みです（${ex.map(b => esc(b.file)).join('、')}）。重複する行は取り込みません。`);
-    summary = `<dl class="kv small"><dt>仕訳行</dt><dd>${r.lines.length}行${dates.length ? `（${dates[0]}〜${dates[dates.length - 1]}）` : ''}</dd>
+    if (r.check.taxN) {
+      const tn = taxDefault(P);
+      opts = `<div class="field"><label for="ipTax">損益に使う金額（税額の列が${r.check.taxN}行にあります）</label><select id="ipTax" data-opt="taxNet"><option value="net" ${tn === 'net' ? 'selected' : ''}>税抜（金額−税額）：税抜経理の場合</option><option value="gross" ${tn === 'gross' ? 'selected' : ''}>税込（金額のまま）：税込経理の場合</option></select></div>`;
+    }
+    if (r.codes?.length) {
+      const miss = r.codes.filter(c => !o.codeNames?.[c] && !S.codeMap?.[(o.soft || 'code') + ':' + c]);
+      if (miss.length) warns.push(`勘定科目がコードだけで書かれています。下の「勘定科目コードの名前」で${miss.length}件の科目名を入力してください（一度入力すると次回から自動で使います）。`);
+    }
+    summary = `${P.soft ? `<p class="small"><strong>${SOFT_LABEL[P.soft]}</strong>の形式として読み取りました。</p>` : ''}<dl class="kv small"><dt>仕訳行</dt><dd>${r.lines.length}行${dates.length ? `（${dates[0]}〜${dates[dates.length - 1]}）` : ''}</dd>
       <dt>借方合計／貸方合計</dt><dd>${yenRaw(r.check.dsum)}円／${yenRaw(r.check.csum)}円 ${r.check.dsum === r.check.csum ? `<span class="good">${icon('circle-check')}一致</span>` : `<span class="bad">${icon('triangle-alert')}不一致（差額 ${yenRaw(r.check.dsum - r.check.csum)}円）</span>`}</dd></dl>`;
     table = `<table class="tbl"><thead><tr><th>日付</th><th style="text-align:left">借方科目</th><th>借方金額</th><th style="text-align:left">貸方科目</th><th>貸方金額</th><th style="text-align:left">摘要</th></tr></thead><tbody>${r.lines.slice(0, 40).map(x => `<tr><td class="rowh">${x.date}</td><td>${esc(x.dacc)}</td><td class="num">${x.dacc ? yenRaw(x.damt) : ''}</td><td>${esc(x.cacc)}</td><td class="num">${x.cacc ? yenRaw(x.camt) : ''}</td><td>${esc(x.memo)}</td></tr>`).join('')}</tbody></table>`;
   } else if (P.type === 'ledger') {
@@ -2067,7 +2097,12 @@ function previewBody(P, typeSel) {
     table = `<table class="tbl"><thead><tr><th>区分</th><th style="text-align:left">科目</th><th>金額</th></tr></thead><tbody>${r.items.slice(0, 80).map(x => `<tr><td class="rowh">${x.section === 'bs' ? '貸借対照表' : '損益計算書'}</td><td>${esc(x.name)}</td><td class="num">${yenRaw(x.amount * mul)}</td></tr>`).join('')}</tbody></table>`;
   }
   // 勘定科目の対応
-  const unknown = Object.entries(P.amap || {}).filter(([, m]) => !m.exists);
+  const cur = new Set(namesOf(P));
+  const unknown = Object.entries(P.amap || {}).filter(([n, m]) => !m.exists && cur.has(n));
+  const codeHtml = r.codes?.length ? `<details open><summary>${icon('hash')}勘定科目コードの名前（${r.codes.length}件）</summary>
+    <div class="tbl-wrap" style="margin-top:8px;max-height:260px"><table class="tbl"><thead><tr><th>コード</th><th style="text-align:left">勘定科目名</th></tr></thead><tbody>
+    ${r.codes.map(c => { const known = o.codeNames?.[c] || S.codeMap?.[(o.soft || 'code') + ':' + c] || ''; return `<tr><td class="rowh">${esc(c)}</td><td><input type="text" data-codename="${esc(c)}" value="${esc(known)}" placeholder="例：普通預金" aria-label="コード${esc(c)}の勘定科目名" style="min-height:40px"></td></tr>`; }).join('')}
+    </tbody></table></div><p class="small muted">会計ソフトの勘定科目一覧と同じ名前にすると、区分（売上・費用・預金など）を自動で判定します。入力した名前はこの端末に保存し、次回から自動で使います。</p></details>` : '';
   const catOpts = sel => [...CATS.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${c.label}</option>`), `<option value="skip" ${sel === 'skip' ? 'selected' : ''}>取り込まない（合計行など）</option>`].join('');
   const amapHtml = unknown.length ? `<details ${unknown.some(([, m]) => m.cat !== 'skip') ? 'open' : ''}><summary>${icon('list-plus')}未登録の勘定科目 ${unknown.length}件（区分を確認）</summary>
     <div class="tbl-wrap" style="margin-top:8px;max-height:260px"><table class="tbl"><thead><tr><th>勘定科目</th><th style="text-align:left">区分</th></tr></thead><tbody>
@@ -2079,7 +2114,7 @@ function previewBody(P, typeSel) {
     ${P.xlsx ? `<p class="small muted">Excelファイル${P.sheets.length > 1 ? `（${P.sheets.length}シート。「${esc(P.sheet)}」を読み取りました）` : ''}から読み取りました。</p>` : ''}
     ${P.kind === 'pdf' && !P.ai ? `<p class="small muted">PDFの文字情報から読み取りました。</p>` : ''}
     ${warns.map(w => `<div class="notice warn">${icon('triangle-alert')}<span>${w}</span></div>`).join('')}
-    ${summary}${colMapUi(P)}${amapHtml}${errHtml}
+    ${summary}${colMapUi(P)}${codeHtml}${amapHtml}${errHtml}
     <div class="tbl-wrap" style="max-height:320px">${table}</div>
     <p class="small muted" id="ipCount">${importCountText(P)}</p>
     <p class="small muted">取り込む前に、現在のデータを端末内バックアップに保存します。取り込んだ内容は「データ取込」画面の履歴からまとめて取り消せます。</p>`;
@@ -2143,17 +2178,20 @@ function commitImport(P) {
     const keyE = e => [e.st, e.date, e.acc, e.amount, e.memo || '', e.counter || ''].join('|');
     const keyC = t => [t.st, t.acct, t.date, t.in, t.out, t.counter || '', t.desc || ''].join('|');
     const exE = new Set(S.entries.filter(e => e.st === 'journal').map(keyE)), exC = new Set(S.cashTx.filter(t => t.st === 'journal').map(keyC));
+    // 金額が税込で税額が別の列にある場合（弥生のインポート形式など）、損益は「金額−税額」の税抜にする
+    const taxNet = r.check.taxN > 0 && taxDefault(P) === 'net';
+    for (const c of r.codes || []) if (o.codeNames?.[c]) (S.codeMap ||= {})[(o.soft || 'code') + ':' + c] = nfkc(o.codeNames[c]);   // 科目コードの名前を覚える
     const groups = new Map();
     for (const l of r.lines) { if (!groups.has(l.v)) groups.set(l.v, []); groups.get(l.v).push(l); }
     for (const lines of groups.values()) {
-      const D = lines.filter(l => l.dacc).map(l => ({ name: l.dacc, amt: l.damt || 0, p: l.dp, memo: l.memo, date: l.date }));
-      const C = lines.filter(l => l.cacc).map(l => ({ name: l.cacc, amt: l.camt || 0, p: l.cp, memo: l.memo, date: l.date }));
+      const D = lines.filter(l => l.dacc).map(l => ({ name: l.dacc, amt: l.damt || 0, tax: l.dacc ? l.dtx || 0 : 0, p: l.dp, memo: l.memo, date: l.date }));
+      const C = lines.filter(l => l.cacc).map(l => ({ name: l.cacc, amt: l.camt || 0, tax: l.cacc ? l.ctx || 0 : 0, p: l.cp, memo: l.memo, date: l.date }));
       const sideEntries = (arr, other, sign) => {
         for (const s of arr) {
           const a = resolveAcc(P, s.name); if (!a) continue;
           if (isPL(a)) {
             const counter = other.length === 1 ? other[0].name : other.length ? '諸口' : '';
-            const e = { id: uid(), date: s.date, acc: a.id, partner: s.p || '', amount: Math.round(s.amt * sign * plSign(a)), memo: s.memo, counter, st: 'journal', src: batch.id, created: 0 };
+            const e = { id: uid(), date: s.date, acc: a.id, partner: s.p || '', amount: Math.round((taxNet ? s.amt - s.tax : s.amt) * sign * plSign(a)), memo: s.memo, counter, st: 'journal', src: batch.id, created: 0 };
             if (exE.has(keyE(e))) { skipped++; continue; }
             S.entries.push(e); added++;
           } else if (a.cash) {
