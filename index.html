@@ -369,7 +369,7 @@ function defaultAccounts() {
 function migrate(d) {
   const e = emptyState();
   d.settings = Object.assign(e.settings, d.settings || {});
-  for (const k of ['budgets', 'cash', 'tb', 'annual', 'counterRules', 'bsGroups']) d[k] = d[k] || {};
+  for (const k of ['budgets', 'cash', 'tb', 'annual', 'counterRules', 'bsGroups', 'varRates']) d[k] = d[k] || {};
   for (const k of ['kpis', 'cashTx', 'banks', 'imports', 'rules', 'entries', 'accounts']) d[k] = d[k] || [];
   // 資金繰り表の項目にキーを付与（旧版は名称のみ）
   for (const c of Object.values(d.cash)) {
@@ -438,7 +438,7 @@ async function save(msg) {
     toast('保存できませんでした。「設定・データ」からバックアップを書き出してください。');
   }
 }
-function saveUi() { try { localStorage.setItem(UIKEY, JSON.stringify({ fin: ui.fin, tab: ui.tab, fy: ui.fy, m: ui.m, mode: ui.mode, plSeries: ui.plSeries, plChart: ui.plChart, d: ui.d, kpiSel: ui.kpiSel, rv: ui.rv })); } catch (e) { } }
+function saveUi() { try { localStorage.setItem(UIKEY, JSON.stringify({ fin: ui.fin, finView: ui.finView, bep: ui.bep, tab: ui.tab, fy: ui.fy, m: ui.m, mode: ui.mode, plSeries: ui.plSeries, plChart: ui.plChart, d: ui.d, kpiSel: ui.kpiSel, rv: ui.rv })); } catch (e) { } }
 function setSaveState(ok) {
   const el = $('#saveState');
   const t = new Date();
@@ -965,8 +965,9 @@ function renderToolbar() {
   const tb = $('#toolbar');
   if (ui.tab === 'settings') { tb.innerHTML = ''; return; }
   const last = lastIdx(ui.fy);
-  const showMode = ['dash', 'pl', 'kpi'].includes(ui.tab);
-  const showMonth = !['detail', 'fin'].includes(ui.tab);
+  const bepView = ui.tab === 'fin' && ui.finView === 'bep';
+  const showMode = ['dash', 'pl', 'kpi'].includes(ui.tab) || bepView;
+  const showMonth = !['detail', 'fin'].includes(ui.tab) || bepView;
   tb.innerHTML = `
     <div class="field"><label for="tbFy">年度</label>
       <select id="tbFy">${fyOptions().map(y => `<option value="${y}" ${y === ui.fy ? 'selected' : ''}>${fyLabel(y)}</option>`).join('')}</select></div>
@@ -2627,6 +2628,7 @@ function fmtInd(v, unit) {
 }
 function finMonths(fy) { return Object.keys(S.tb?.[fy] || {}).map(Number).filter(i => S.tb[fy][i].rows.some(r => accById(r.acc)?.cat === 'bs' && r.close != null)).sort((a, b) => a - b); }
 function viewFin(main) {
+  if (ui.finView === 'bep') return viewBEP(main);
   const fy = ui.fy, f = ui.fin ||= { basis: null, m: null, avg: true };
   const fsOk = !!S.annual?.[fy]?.bsItems, tbM = finMonths(fy);
   if (!f.basis || (f.basis === 'fs' && !fsOk && tbM.length) || (f.basis === 'tb' && !tbM.length)) f.basis = fsOk ? 'fs' : 'tb';
@@ -2639,7 +2641,7 @@ function viewFin(main) {
   </div>`;
   const ctx = finCtx(fy, f.basis, f.m, f.avg);
   if (!ctx) {
-    main.innerHTML = `<div class="stack"><div class="card stack"><h2>財務分析</h2>${controls}
+    main.innerHTML = `<div class="stack">${finSwitch()}<div class="card stack"><h2>財務分析</h2>${controls}
       <p>財務分析には、貸借対照表の数値が必要です。「データ取込」で、${fyLabel(fy)}の<strong>決算書</strong>（貸借対照表・損益計算書）か、<strong>試算表</strong>（貸借対照表の科目を含むもの）を取り込んでください。</p>
       <p class="small muted">キャッシュ・フロー計算書と、営業キャッシュ・フローを使う指標には、期首の貸借対照表（前期の決算書、または期首残高のある試算表）も必要です。</p>
       ${oldFs.length ? `<div class="notice warn">${icon('triangle-alert')}<span>${oldFs.join('、')}の決算書は、貸借対照表を保存する前の版で取り込まれています。お手数ですが、もう一度取り込んでください。</span></div>` : ''}
@@ -2665,7 +2667,7 @@ function viewFin(main) {
   const cfP = pctx?.cf;
   const bsRows = [['流動資産', 'CA'], ['　現金及び預金', 'cash'], ['　売上債権', 'recv'], ['　棚卸資産', 'inv'], ['固定資産', 'FA'], ['　有形固定資産', 'tang'], ['　無形固定資産', 'intg'], ['　投資その他の資産', 'invst'], ['繰延資産', 'DA'], ['資産合計（総資本）', 'TA'], ['流動負債', 'CL'], ['　買入債務', 'pay'], ['固定負債', 'FL'], ['負債合計', 'TL'], ['　うち有利子負債', 'debt'], ['純資産（自己資本）', 'EQ']];
   const allItems = [...new Map([...(ctx.B0?.items || []), ...ctx.B1.items].map(x => [x.name, x])).values()];
-  main.innerHTML = `<div class="stack">
+  main.innerHTML = `<div class="stack">${finSwitch()}
     <div class="card stack"><div class="card-hd" style="margin:0"><h2>財務分析　${esc(ctx.title)}</h2><button class="btn sm" data-act="csvFin">${icon('file-down')}CSV出力</button></div>${controls}
       <p class="small muted">期末：${esc(ctx.B1.label)}　／　期首：${ctx.B0 ? esc(ctx.B0.label) : 'なし'}　／　損益：${f.basis === 'fs' ? '決算書の損益計算書' : `損益の実績（${mLabel(0)}〜${mLabel(f.m)}）`}　／　${unitNote()}</p></div>
     ${warn.map(w => `<div class="notice warn">${icon('triangle-alert')}<span>${esc(w)}</span></div>`).join('')}
@@ -2698,6 +2700,149 @@ function csvFin() {
   const rows = [['財務分析', ctx.title], [], ['指標', '値', '単位', '計算式', '計算に使った値'], ...I.map(x => [x.name, x.val == null ? '' : (x.unit === '%' ? +(x.val * 100).toFixed(2) : +x.val.toFixed(2)), x.unit, x.formula, x.detail])];
   if (ctx.cf) { rows.push([], ['キャッシュ・フロー計算書（間接法）', '金額（円）']); ctx.cf.lines.forEach(l => rows.push([l.label, l.v ?? ''])); rows.push(['検算差額', Math.round(-ctx.cf.diff)]); }
   return download(`財務分析_${fyLabel(ui.fy)}_${stamp()}.csv`, '﻿' + toCsv(rows), 'text/csv');
+}
+
+/* =====================================================================
+ * 損益分岐点分析（固変分解：勘定科目法。参考に最小二乗法）
+ * ===================================================================== */
+const VAR_RE = /荷造|運賃|発送|販売手数料|代理店手数料|外注|販売促進|ロイヤリティ|支払ポイント|材料費/;
+function defaultVarRate(a) { return a.cat === 'cogs' ? 1 : (a.cat === 'sga' && VAR_RE.test(normName(a.name)) ? 1 : 0); }
+function varRate(a) { const v = S.varRates?.[a.id]; return v != null ? v : defaultVarRate(a); }
+// valFn(科目ID) → 期間の金額。basis：'op'（営業利益ベース）／'ord'（経常利益ベース：営業外損益を固定費に含める）
+function bepCalc(valFn, basis) {
+  let S_ = 0, V = 0, F = 0, any = false;
+  const rows = [];
+  for (const a of S.accounts) {
+    const v = valFn(a.id); if (v == null) continue;
+    if (v) any = true;
+    if (a.cat === 'sales') S_ += v;
+    else if (a.cat === 'cogs' || a.cat === 'sga') { const r = varRate(a); V += v * r; F += v * (1 - r); rows.push({ a, v, r }); }
+    else if (basis === 'ord' && a.cat === 'noe') { F += v; rows.push({ a, v, r: 0, nonop: true }); }
+    else if (basis === 'ord' && a.cat === 'noi') { F -= v; rows.push({ a, v: -v, r: 0, nonop: true }); }
+  }
+  if (!any) return null;
+  const M = S_ - V, m = S_ > 0 ? M / S_ : null;
+  const bep = m != null && m > 0 ? F / m : null;
+  return { S: S_, V, F, M, m, vr: S_ > 0 ? V / S_ : null, profit: M - F, bep, ratio: bep != null && S_ > 0 ? bep / S_ : null, safety: bep != null && S_ > 0 ? 1 - bep / S_ : null, rows };
+}
+// 最小二乗法（月次の売上高と総費用）
+function bepRegression(fy, basis) {
+  const pts = [];
+  for (const y of [fy - 1, fy]) {
+    const { A, last } = plSet(y);
+    const s = rowByKey(A, 'sub_sales').vals, p = rowByKey(A, basis === 'ord' ? 'ord' : 'op').vals;
+    for (let i = 0; i <= last; i++) if (s[i] != null && p[i] != null && agg(y).monthSrc[i]) pts.push({ x: s[i], y: s[i] - p[i] });
+  }
+  if (pts.length < 6) return { n: pts.length };
+  const n = pts.length, mx = pts.reduce((t, q) => t + q.x, 0) / n, my = pts.reduce((t, q) => t + q.y, 0) / n;
+  const sxx = pts.reduce((t, q) => t + (q.x - mx) ** 2, 0), sxy = pts.reduce((t, q) => t + (q.x - mx) * (q.y - my), 0), syy = pts.reduce((t, q) => t + (q.y - my) ** 2, 0);
+  if (sxx === 0) return { n };
+  const b = sxy / sxx, a = my - b * mx, r2 = syy ? (sxy * sxy) / (sxx * syy) : null;
+  return { n, b, a, r2, bepM: b < 1 ? a / (1 - b) : null };
+}
+function viewBEP(main) {
+  const fy = ui.fy, mode = ui.mode, m = ui.m, set = plSet(fy), last = set.last;
+  const bp = ui.bep ||= { basis: 'ord', ds: 0, dv: 0, df: 0, target: '' };
+  const per = (fyy, lineFn, lastIdx2) => id => pick(lineFn(fyy, id), mode, m, mode === 'year' ? null : lastIdx2);
+  const useAnnual = mode === 'year' && set.last < 0 && hasAnnual(fy);
+  const actFn = useAnnual ? (id => S.annual[fy].pl[id] ?? null) : (mode === 'year' ? (id => sumN(actualLine(fy, id))) : per(fy, actualLine, last));
+  const cA = bepCalc(actFn, bp.basis);
+  const cB = bepCalc(id => pick(budgetLine(fy, id), mode, m, null), bp.basis);
+  const pyFn = mode === 'year' ? (set.plast === 11 ? (id => sumN(actualLine(fy - 1, id))) : hasAnnual(fy - 1) ? (id => S.annual[fy - 1].pl[id] ?? null) : null) : per(fy - 1, actualLine, set.plast);
+  const cP = pyFn ? bepCalc(pyFn, bp.basis) : null;
+  const pl = bp.basis === 'ord' ? '経常利益' : '営業利益';
+  const months = mode === 'month' ? 1 : mode === 'cum' ? m + 1 : 12;
+  const basisSel = `<div class="field"><label for="bepBasis">利益の段階</label><select id="bepBasis"><option value="ord" ${bp.basis === 'ord' ? 'selected' : ''}>経常利益ベース（営業外損益を固定費に含める）</option><option value="op" ${bp.basis === 'op' ? 'selected' : ''}>営業利益ベース</option></select></div>`;
+  const yA = useAnnual ? `${fyLabel(fy)}（決算書）` : '実績';
+  const cols = [[yA, cA], ['予算', cB], ['前年', cP]].filter(([, c]) => c);
+  const F_ = (c, f) => c ? f(c) : '—';
+  const rowsDef = [
+    ['売上高', c => yen(c.S)], ['変動費', c => yen(c.V)], ['限界利益（売上高−変動費）', c => yen(c.M), 'sub'], ['限界利益率', c => pct(c.m)], ['変動費率', c => pct(c.vr)],
+    ['固定費', c => yen(c.F)], [pl, c => `<span class="${c.profit < 0 ? 'bad' : ''}">${yen(c.profit)}</span>`, 'total'],
+    ['損益分岐点売上高', c => c.bep == null ? '<span class="bad">限界利益がマイナス</span>' : yen(c.bep), 'total'], ['損益分岐点比率', c => pct(c.ratio)], ['安全余裕率（経営安全率）', c => c.safety == null ? '—' : `<span class="${c.safety < 0 ? 'bad' : ''}">${pct(c.safety)}</span>`],
+    ['損益分岐点売上高（月平均）', c => c.bep == null ? '—' : yen(c.bep / months)],
+  ];
+  if (!cA && !cB) {
+    main.innerHTML = `<div class="stack">${finSwitch()}<div class="card stack"><h2>損益分岐点分析</h2><p>${fyLabel(fy)}の損益の実績・予算がありません。明細・仕訳帳・試算表・決算書を取り込むか、予算を入力してください。</p></div></div>`;
+    return;
+  }
+  // シミュレーション
+  const c0 = cA || cB;
+  const ds = Number(bp.ds) || 0, dv = Number(bp.dv) || 0, df = Number(bp.df) || 0;
+  const S2 = c0.S * (1 + ds / 100), vr2 = (c0.vr ?? 0) + dv / 100, F2 = c0.F * (1 + df / 100), M2 = S2 * (1 - vr2), m2 = 1 - vr2;
+  const prof2 = M2 - F2, bep2 = m2 > 0 ? F2 / m2 : null;
+  const tgt = parseNum(bp.target);
+  const need = tgt != null && !Number.isNaN(tgt) && c0.m > 0 ? (c0.F + tgt) / c0.m : null;
+  const reg = bepRegression(fy, bp.basis);
+  const accRows = (cA || cB).rows;
+  main.innerHTML = `<div class="stack">${finSwitch()}
+    ${futureNotice()}
+    <div class="card stack"><div class="card-hd" style="margin:0"><h2>損益分岐点分析　${useAnnual ? fyLabel(fy) + '（決算書）' : periodText()}</h2><span class="small muted">${unitNote()}</span></div>
+      <div class="form-grid">${basisSel}</div>
+      <p class="small muted">変動費と固定費は、勘定科目ごとの「変動費の割合」で分けています（勘定科目法）。割合は下の表で変更できます。${useAnnual ? '月次の実績がないため決算書の金額を使っています。' : ''}</p></div>
+    <div class="grid g-kpi">
+      <div class="card stat"><div class="lbl">損益分岐点売上高</div><div class="val">${c0.bep == null ? '—' : yen(c0.bep)}<small>${unitK() ? '千円' : '円'}</small></div><span class="kvline"><span>現在の売上高</span><span>${yen(c0.S)}</span></span><span class="kvline"><span>月平均</span><span>${c0.bep == null ? '—' : yen(c0.bep / months)}</span></span></div>
+      <div class="card stat"><div class="lbl">損益分岐点比率</div><div class="val">${pct(c0.ratio)}</div><span class="kvline"><span>安全余裕率</span><span class="${c0.safety < 0 ? 'bad' : ''}">${pct(c0.safety)}</span></span><span class="kvline"><span>売上高があと何%減ると赤字か</span><span>${c0.safety == null ? '—' : c0.safety > 0 ? pct(c0.safety) : '既に下回っています'}</span></span></div>
+      <div class="card stat"><div class="lbl">限界利益率</div><div class="val">${pct(c0.m)}</div><span class="kvline"><span>限界利益</span><span>${yen(c0.M)}</span></span><span class="kvline"><span>固定費</span><span>${yen(c0.F)}</span></span></div>
+    </div>
+    <div class="card"><div class="card-hd"><h3>実績・予算・前年の比較（${useAnnual ? '通期' : periodText()}）</h3></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>項目</th>${cols.map(([l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
+      ${rowsDef.map(([l, f, cls]) => `<tr class="${cls || ''}"><td class="rowh">${l}</td>${cols.map(([, c]) => `<td class="num">${F_(c, f)}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div>
+      <p class="small muted" style="margin-top:8px">損益分岐点売上高＝固定費÷限界利益率　損益分岐点比率＝損益分岐点売上高÷売上高　安全余裕率＝1−損益分岐点比率。${bp.basis === 'ord' ? '固定費には「営業外費用−営業外収益」を含めています。' : ''}</p></div>
+    <div class="card"><div class="card-hd"><h3>損益分岐点図表（${cols[0][0]}）</h3></div><div class="chart-box" style="height:340px"><canvas id="cBep" role="img" aria-label="売上高線・総費用線・固定費線と損益分岐点"></canvas></div></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-hd"><h3>シミュレーション</h3></div>
+        <div class="form-grid">
+          <div class="field"><label for="bepDs">売上高の増減（%）</label><input type="text" inputmode="decimal" id="bepDs" value="${esc(bp.ds)}"></div>
+          <div class="field"><label for="bepDv">変動費率の増減（ポイント）</label><input type="text" inputmode="decimal" id="bepDv" value="${esc(bp.dv)}"></div>
+          <div class="field"><label for="bepDf">固定費の増減（%）</label><input type="text" inputmode="decimal" id="bepDf" value="${esc(bp.df)}"></div>
+        </div>
+        <dl class="kv small" style="margin-top:12px"><dt>売上高</dt><dd>${yen(S2)}</dd><dt>変動費率</dt><dd>${pct(vr2)}</dd><dt>固定費</dt><dd>${yen(F2)}</dd>
+          <dt>${pl}</dt><dd class="${prof2 < 0 ? 'bad' : ''}">${yen(prof2)}（現在との差 ${yenSigned(prof2 - c0.profit)}）</dd><dt>損益分岐点売上高</dt><dd>${bep2 == null ? '—' : yen(bep2)}</dd><dt>安全余裕率</dt><dd>${bep2 == null || S2 <= 0 ? '—' : pct(1 - bep2 / S2)}</dd></dl>
+        <div class="field" style="margin-top:12px"><label for="bepT">目標の${pl}（円・この期間）</label><input type="text" inputmode="decimal" id="bepT" value="${esc(bp.target)}" placeholder="例：10,000,000"></div>
+        <p class="small" style="margin-top:6px">目標達成に必要な売上高：<strong>${need == null ? '—' : yen(need)}</strong>${need != null ? `（現在より ${yenSigned(need - c0.S)}、${pct(c0.S ? need / c0.S - 1 : null)}）` : ''}<br><span class="muted">＝（固定費＋目標利益）÷ 限界利益率（現在の変動費率・固定費で計算）</span></p>
+      </div>
+      <div class="card"><div class="card-hd"><h3>参考：最小二乗法による固変分解</h3></div>
+        ${reg.b == null ? `<p class="small muted">月次の実績が6か月分以上ないため計算できません（現在${reg.n}か月）。</p>` : `
+        <dl class="kv small"><dt>使った月数</dt><dd>${reg.n}か月（${fyLabel(fy - 1)}〜${fyLabel(fy)}の月次実績）</dd><dt>変動費率</dt><dd>${pct(reg.b)}</dd><dt>固定費（月額）</dt><dd>${yen(reg.a)}</dd>
+          <dt>損益分岐点売上高（月額）</dt><dd>${reg.bepM == null || reg.bepM < 0 ? '—' : yen(reg.bepM)}</dd><dt>決定係数（当てはまり）</dt><dd>${reg.r2 == null ? '—' : reg.r2.toFixed(2)}</dd></dl>
+        <p class="small muted" style="margin-top:8px">月ごとの「売上高」と「総費用（売上高−${pl}）」の関係から推定した参考値です。賞与月など季節の変動があると誤差が大きくなります${reg.r2 != null && reg.r2 < 0.7 ? '（決定係数が低いため、参考程度に見てください）' : ''}。${reg.b >= 1 || reg.a < 0 ? '<strong>推定結果が不自然なため、勘定科目法の結果を使ってください。</strong>' : ''}</p>`}
+      </div>
+    </div>
+    <div class="card"><div class="card-hd"><h3>変動費・固定費の分け方（勘定科目ごと）</h3><button class="btn sm" data-act="resetVar">${icon('rotate-ccw')}標準に戻す</button></div>
+      <div class="tbl-wrap tall"><table class="tbl"><thead><tr><th>勘定科目</th><th style="text-align:left">区分</th><th>金額（${cols[0][0]}）</th><th>変動費の割合</th><th>変動費</th><th>固定費</th></tr></thead><tbody>
+      ${accRows.map(x => `<tr><td class="rowh">${esc(x.a.name)}</td><td>${x.nonop ? CAT[x.a.cat].label + '（固定費として扱う）' : CAT[x.a.cat].label}</td><td class="num">${yen(x.v)}</td><td class="num">${x.nonop ? '—' : `<input class="cell" style="width:80px" inputmode="decimal" data-varrate="${x.a.id}" data-fk="vr:${x.a.id}" value="${Math.round(x.r * 100)}" aria-label="${esc(x.a.name)}の変動費の割合（%）"> %`}</td><td class="num">${yen(x.v * x.r)}</td><td class="num">${yen(x.v * (1 - x.r))}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="small muted" style="margin-top:8px">標準：売上原価の科目は100%変動費、販売費及び一般管理費は荷造運賃・販売手数料・外注費・販売促進費などを100%変動費、それ以外は固定費。業種や実態に合わせて変更してください（すべての年度に反映、自動保存）。</p></div>
+  </div>`;
+  // 図表
+  const c = cols[0][1];
+  if (c && c.m != null) {
+    const xmax = Math.max(c.S, c.bep || 0) * 1.4 || 1;
+    const pts = n => Array.from({ length: n + 1 }, (_, i) => xmax * i / n);
+    const ax = css('--axis'), gr = css('--grid');
+    const lbl = v => `${yenShort(v)}`;
+    mkChart('cBep', {
+      type: 'line',
+      data: { datasets: [
+        lineDs('売上高線', pts(2).map(x => ({ x, y: x })), css('--s-actual'), { pointRadius: 0 }),
+        lineDs('総費用線（固定費＋変動費）', pts(2).map(x => ({ x, y: c.F + x * c.vr })), css('--s-prior'), { pointRadius: 0 }),
+        lineDs('固定費線', pts(2).map(x => ({ x, y: c.F })), css('--s-budget'), { pointRadius: 0, borderDash: [6, 4] }),
+        ...(c.bep != null ? [{ type: 'scatter', label: '損益分岐点', data: [{ x: c.bep, y: c.bep }], backgroundColor: css('--bad'), borderColor: css('--surface'), borderWidth: 2, pointRadius: 7, pointHoverRadius: 9 }] : []),
+        { type: 'scatter', label: '現在の売上高', data: [{ x: c.S, y: c.S }], backgroundColor: css('--s-line'), borderColor: css('--surface'), borderWidth: 2, pointRadius: 7, pointHoverRadius: 9, pointStyle: 'rectRot' },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'nearest', intersect: false },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true, padding: 14 } }, tooltip: { callbacks: { label: t => `${t.dataset.label}：売上高 ${yen(t.raw.x)} → ${yen(t.raw.y)}` } } },
+        scales: { x: { type: 'linear', min: 0, max: xmax, title: { display: true, text: '売上高', color: ax }, grid: { display: false }, ticks: { color: ax, callback: lbl } }, y: { min: 0, title: { display: true, text: '金額（売上高・費用）', color: ax }, grid: { color: gr }, border: { display: false }, ticks: { color: ax, callback: lbl } } },
+      },
+    });
+  } else { const el = $('#cBep'); if (el) el.parentElement.innerHTML = '<div class="chart-fallback">売上高・限界利益がないため図表を表示できません。</div>'; }
+}
+function finSwitch() {
+  const v = ui.finView || 'ratio';
+  return `<div class="seg no-print" role="group" aria-label="財務分析の表示" style="align-self:flex-start"><button type="button" data-finview="ratio" aria-pressed="${v === 'ratio'}">${icon('scale')} 財務指標・CF計算書</button><button type="button" data-finview="bep" aria-pressed="${v === 'bep'}">${icon('chart-line')} 損益分岐点</button></div>`;
 }
 
 /* ---------- 設定・データ ---------- */
@@ -2855,6 +3000,7 @@ document.addEventListener('click', ev => {
     return;
   }
   if (ds.kpisel) { ui.kpiSel = ds.kpisel; render(); return; }
+  if (ds.finview) { ui.finView = ds.finview; render(); return; }
   if (ds.unc !== undefined) { ui.tab = 'import'; ui.rv = { ...ui.rv, m: +ds.unc, filter: 'un' }; render(); window.scrollTo(0, 0); return; }
   if (ds.kind !== undefined) {
     const c = S.cash[ui.fy], i = +ds.kind, cf = cashCalc(ui.fy);
@@ -2902,6 +3048,7 @@ document.addEventListener('click', ev => {
   if (!act) return;
   const acts = {
     csvPL, csvCash, csvFin,
+    resetVar: () => { S.varRates = {}; save('変動費の割合を標準に戻しました'); render(); },
     addSampleFin: () => { const fy = fyIdx(isoDate(new Date())).fy; snapshot('サンプルの決算書追加の前'); sampleFinance(S, fy, fyIdx(isoDate(new Date())).i - 1); ui.fin = { basis: null, m: null, avg: true }; save('サンプルの決算書・試算表を追加しました'); render(); },
     exportCsv: exportEntriesCsv, importCsv: importCsvFlow, exportJson, importJson: () => importJsonFlow(),
     cancelEdit: () => { ui.editId = null; render(); },
@@ -2939,6 +3086,9 @@ document.addEventListener('change', ev => {
   if (t.id === 'rvLearn') { ui.learn = t.checked; return; }
   if (t.id === 'useDefRules') { S.settings.useDefaultRules = t.checked; reclassifyAll(); save('分類ルールを更新しました'); render(); return; }
   if (ds.txkey) { setTxKey(ds.txkey, t.value); return; }
+  if (t.id === 'bepBasis') { ui.bep.basis = t.value; render(); return; }
+  if (['bepDs', 'bepDv', 'bepDf', 'bepT'].includes(t.id)) { const v = t.value.trim(); if (v && Number.isNaN(parseNum(v))) { toast('数字で入力してください'); return rerender(); } ui.bep[{ bepDs: 'ds', bepDv: 'dv', bepDf: 'df', bepT: 'target' }[t.id]] = t.id === 'bepT' ? v : (parseNum(v) ?? 0); rerender(); return; }
+  if (ds.varrate) { const n = parseNum(t.value); if (n == null || Number.isNaN(n) || n < 0 || n > 100) { toast('0〜100の数字で入力してください'); return rerender(); } (S.varRates ||= {})[ds.varrate] = n / 100; save(); rerender(); return; }
   if (t.id === 'fnB') { ui.fin.basis = t.value; render(); return; }
   if (t.id === 'fnM') { ui.fin.m = +t.value; render(); return; }
   if (t.id === 'fnAvg') { ui.fin.avg = t.value === '1'; render(); return; }
