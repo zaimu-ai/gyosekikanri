@@ -193,6 +193,9 @@ dialog .dlg-hd,dialog .dlg-ft{flex:none}
 .kind.auto{border-color:var(--primary);background:var(--primary);color:var(--on-primary)}
 .tbl tr.unc td{background:var(--warn-bg)}
 .tbl tr.chk td{font-size:14px;background:var(--surface-2)}
+.tbl .wrap{white-space:normal}
+.tbl.fin td.rowh{white-space:normal;min-width:220px;max-width:420px}
+.tbl tr.ind-sub td.rowh{padding-left:28px}
 .icon-btn[aria-pressed="true"]{background:var(--primary-weak);color:var(--primary)}
 @media (max-width:760px){
   .tabs{position:fixed;bottom:0;left:0;right:0;z-index:30;background:var(--surface);border-top:1px solid var(--border);padding:0 0 env(safe-area-inset-bottom);justify-content:space-around;gap:0;max-width:none}
@@ -277,6 +280,7 @@ const TABS = [
   { id: 'detail', label: '科目別明細・内訳', short: '明細', icon: 'list-tree' },
   { id: 'cash', label: '資金繰り表', short: '資金繰り', icon: 'wallet' },
   { id: 'kpi', label: 'KPI', short: 'KPI', icon: 'target' },
+  { id: 'fin', label: '財務分析', short: '分析', icon: 'scale' },
   { id: 'import', label: 'データ取込', short: '取込', icon: 'file-input' },
 ];
 const SRC_LABEL = { manual: '手入力', csv: '明細CSV', sample: 'サンプル', journal: '仕訳帳', ledger: '総勘定元帳', tb: '試算表', bank: '預金明細' };
@@ -288,7 +292,7 @@ const RE = {
   total: /合計|小計|^計$|総利益|営業利益|営業損失|経常利益|経常損失|純利益|純損失|税引前|^(売上原価|販売費及び一般管理費|販売費及一般管理費|販管費|営業外収益|営業外費用|特別利益|特別損失|製造原価)(計|合計)?$|^(資産|負債|純資産|流動資産|固定資産|流動負債|固定負債|株主資本|有形固定資産|無形固定資産|投資その他の資産|繰延資産|負債及び純資産|負債・純資産|評価・換算差額等|利益剰余金|資本剰余金|その他利益剰余金)(の部)?(合計)?$/,
   fixed: /建物|附属設備|構築物|機械|装置|車両|運搬具|工具|器具|備品|土地|ソフトウェア|建設仮勘定|リース資産|固定資産/,
   payroll: /給料|給与|賞与|役員報酬|雑給|退職金/,
-  bsName: /預金|^現金|売掛|受取手形|電子記録債権|棚卸資産|^商品$|^製品$|原材料|仕掛品|貯蔵品|前払|未収|仮払金|貸付|立替|建物|附属設備|構築物|機械|車両|工具|器具|備品|土地|ソフトウェア|敷金|保証金|差入|出資金|有価証券|買掛|支払手形|電子記録債務|未払|預り金|前受|仮受|借入|引当金|資本金|剰余金|準備金|繰越利益|社債|リース債務|仮払消費税|仮受消費税|保険積立|繰延|減価償却累計/,
+  bsName: /預金|^現金|売掛|受取手形|電子記録債権|棚卸資産|^商品$|^製品$|原材料|仕掛品|貯蔵品|前払|未収|仮払金|貸付|立替|建物|附属設備|構築物|機械|車両|工具|器具|備品|土地|ソフトウェア|敷金|保証金|差入|出資金|有価証券|買掛|支払手形|電子記録債務|未払|預り金|前受|仮受|借入|引当金|資本金|剰余金|準備金|繰越利益|社債|リース債務|仮払消費税|仮受消費税|保険積立|繰延|減価償却累計|建設仮勘定|のれん|特許権|商標権|借地権|電話加入権|施設利用権|投資不動産|関係会社株式|社債|資産除去債務|新株予約権|自己株式|評価差額/,
 };
 const DEFAULT_RULES = [
   { re: /給与|給料|賞与|キユウヨ|キュウヨ|シヨウヨ|ショウヨ/, out: 'payroll' },
@@ -345,7 +349,7 @@ function emptyState() {
     settings: { company: '', fyStart: 4, unit: 'yen', minCash: 5000000, tax: '税抜', sample: false, cashLag: 1, useDefaultRules: true },
     accounts: defaultAccounts(),
     budgets: {}, entries: [], cash: {}, kpis: [],
-    cashTx: [], banks: [], tb: {}, annual: {}, imports: [], rules: [], counterRules: {},
+    cashTx: [], banks: [], tb: {}, annual: {}, imports: [], rules: [], counterRules: {}, bsGroups: {},
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
 }
@@ -364,7 +368,7 @@ function defaultAccounts() {
 function migrate(d) {
   const e = emptyState();
   d.settings = Object.assign(e.settings, d.settings || {});
-  for (const k of ['budgets', 'cash', 'tb', 'annual', 'counterRules']) d[k] = d[k] || {};
+  for (const k of ['budgets', 'cash', 'tb', 'annual', 'counterRules', 'bsGroups']) d[k] = d[k] || {};
   for (const k of ['kpis', 'cashTx', 'banks', 'imports', 'rules', 'entries', 'accounts']) d[k] = d[k] || [];
   // 資金繰り表の項目にキーを付与（旧版は名称のみ）
   for (const c of Object.values(d.cash)) {
@@ -433,7 +437,7 @@ async function save(msg) {
     toast('保存できませんでした。「設定・データ」からバックアップを書き出してください。');
   }
 }
-function saveUi() { try { localStorage.setItem(UIKEY, JSON.stringify({ tab: ui.tab, fy: ui.fy, m: ui.m, mode: ui.mode, plSeries: ui.plSeries, plChart: ui.plChart, d: ui.d, kpiSel: ui.kpiSel, rv: ui.rv })); } catch (e) { } }
+function saveUi() { try { localStorage.setItem(UIKEY, JSON.stringify({ fin: ui.fin, tab: ui.tab, fy: ui.fy, m: ui.m, mode: ui.mode, plSeries: ui.plSeries, plChart: ui.plChart, d: ui.d, kpiSel: ui.kpiSel, rv: ui.rv })); } catch (e) { } }
 function setSaveState(ok) {
   const el = $('#saveState');
   const t = new Date();
@@ -927,7 +931,7 @@ function render() {
   $('#settingsBtn').setAttribute('aria-pressed', ui.tab === 'settings');
   renderTabs(); renderToolbar();
   const main = $('#main');
-  ({ dash: viewDash, pl: viewPL, detail: viewDetail, cash: viewCash, kpi: viewKPI, import: viewImport, settings: viewSettings }[ui.tab] || viewDash)(main);
+  ({ dash: viewDash, pl: viewPL, detail: viewDetail, cash: viewCash, kpi: viewKPI, fin: viewFin, import: viewImport, settings: viewSettings }[ui.tab] || viewDash)(main);
   drawIcons();
   if (fk) { const el = $(`[data-fk="${CSS.escape(fk)}"]`); if (el) { el.focus(); if (el.select) el.select(); } }
   saveUi();
@@ -961,7 +965,7 @@ function renderToolbar() {
   if (ui.tab === 'settings') { tb.innerHTML = ''; return; }
   const last = lastIdx(ui.fy);
   const showMode = ['dash', 'pl', 'kpi'].includes(ui.tab);
-  const showMonth = !['detail'].includes(ui.tab);
+  const showMonth = !['detail', 'fin'].includes(ui.tab);
   tb.innerHTML = `
     <div class="field"><label for="tbFy">年度</label>
       <select id="tbFy">${fyOptions().map(y => `<option value="${y}" ${y === ui.fy ? 'selected' : ''}>${fyLabel(y)}</option>`).join('')}</select></div>
@@ -1514,7 +1518,7 @@ function csvToTable(type, rows) {
   return { headers: rows[bi].map(h => h.trim()), rows: rows.slice(bi + 1), pre: rows.slice(0, bi) };
 }
 function detectType(name, text, rows) {
-  const n = nfkc(name) + ' ' + nfkc(text).slice(0, 3000);
+  const n = nfkc(name) + ' ' + nfkc(text).slice(0, 3000) + ' ' + normName(String(text).slice(0, 3000));   // 「貸 借 対 照 表」のような字間の空白も判定
   if (rows && rows.length && /^(2000|2100|2101|2110|2111)$/.test((rows[0][0] || '').trim()) && rows[0].length >= 15) return 'journal';
   if (/仕訳帳|仕訳日記帳|仕訳データ/.test(n)) return 'journal';
   if (/総勘定元帳|元帳/.test(n)) return 'ledger';
@@ -1729,7 +1733,7 @@ function parseFsLines(rows, text) {
   }
   function pushItem(n, v) {
     n = normName(n).replace(/^[【(（\[]|[】)）\]]$/g, ''); const a = parseNum(v);
-    if (!n || a == null || Number.isNaN(a) || /^(自|至|令和|平成|第\d+期)/.test(n) || /年\d*月|^\d/.test(n)) return;
+    if (!n || a == null || Number.isNaN(a) || /^(自|至|令和|平成|第\d+期)/.test(n) || /^\d{1,4}年\d{1,2}月|^[\d,.]+$/.test(n)) return;   // 日付や数字だけの行は除く（「1年以内返済予定の長期借入金」は残す）
     items.push({ section, name: n, amount: a });
   }
   return { items, unitK };
@@ -2153,7 +2157,10 @@ function commitImport(P) {
       pl[a.id] = (pl[a.id] || 0) + fsSigned(x) * mul; added++;
     }
     const chk = fsCheck(P);
-    S.annual[o.fy] = { pl, cashBS: chk.cash == null ? null : chk.cash * mul, src: batch.id, file: P.name };
+    const isBs = x => x.section === 'bs' || guessCat(x.name) === 'bs' || DOC_TOTALS.some(([re]) => re.test(normName(x.name)));
+    S.annual[o.fy] = { pl, cashBS: chk.cash == null ? null : chk.cash * mul, src: batch.id, file: P.name,
+      bsItems: r.items.filter(isBs).map(x => ({ name: x.name, amount: x.amount * mul })),   // 財務分析用（貸借対照表）
+      items: r.items.map(x => ({ section: x.section, name: x.name, amount: x.amount * mul })) };
     batch.period = fyLabel(o.fy);
   }
   batch.count = added;
@@ -2414,6 +2421,282 @@ function kpiDialog(k) {
     }], dlg => dlg.querySelector('#kName').focus());
 }
 
+/* =====================================================================
+ * 財務分析（収益性・安全性）とキャッシュフロー計算書（間接法）
+ * ===================================================================== */
+const BSG = {
+  cash: '現金及び預金', sec: '有価証券（流動資産）', recv: '売上債権', inv: '棚卸資産', oca: 'その他の流動資産',
+  tang: '有形固定資産', cip: '建設仮勘定', intg: '無形固定資産', invst: '投資その他の資産', def: '繰延資産',
+  pay: '買入債務', debtS: '短期借入金等（有利子）', clo: 'その他の流動負債', debtL: '長期借入金・社債等（有利子）', flo: 'その他の固定負債',
+  eq: '純資産', unk: '未分類（計算に含めません）',
+};
+const BS_SIDE = { cash: 'A', sec: 'A', recv: 'A', inv: 'A', oca: 'A', tang: 'A', cip: 'A', intg: 'A', invst: 'A', def: 'A', pay: 'L', debtS: 'L', clo: 'L', debtL: 'L', flo: 'L', eq: 'E', unk: '?' };
+const CONTRA = /減価償却累計|償却累計|貸倒引当金|自己株式/;
+const DOC_TOTALS = [
+  [/^流動資産(の部)?(合計|計)$/, 'CA'], [/^固定資産(の部)?(合計|計)$/, 'FA'], [/^繰延資産(の部)?(合計|計)$/, 'DA'], [/^資産(の部)?(合計|計)$/, 'TA'],
+  [/^流動負債(の部)?(合計|計)$/, 'CL'], [/^固定負債(の部)?(合計|計)$/, 'FL'], [/^負債(の部)?(合計|計)$/, 'TL'], [/^純資産(の部)?(合計|計)$/, 'EQ'],
+  [/^負債(及び|および|・)?純資産(の部)?(合計|計)$/, 'TLE'], [/^有形固定資産(合計|計)$/, 'tangT'], [/^無形固定資産(合計|計)$/, 'intgT'], [/^投資その他の資産(合計|計)$/, 'invstT'],
+];
+function bsGroupOf(name) {
+  const n = normName(name);
+  if (S.bsGroups?.[n]) return S.bsGroups[n];
+  if (RE.total.test(n) || DOC_TOTALS.some(([re]) => re.test(n))) return null;
+  if (/資本金|資本剰余金|利益剰余金|資本準備金|利益準備金|別途積立金|繰越利益|剰余金|自己株式|新株予約権|評価差額|積立金|出資金$/.test(n) && !/投資|関係会社/.test(n)) return 'eq';
+  if (/短期借入|1年以内返済|一年以内返済|1年内返済|当座借越|割引手形/.test(n)) return 'debtS';
+  if (/借入金|社債|リース債務/.test(n) && !/貸付/.test(n)) return 'debtL';
+  if (/買掛金|支払手形|電子記録債務|工事未払/.test(n)) return 'pay';
+  if (/退職給付引当|長期未払|長期預り|資産除去債務|繰延税金負債|退職慰労引当/.test(n)) return 'flo';
+  if (/貸倒引当金/.test(n)) return 'recv';
+  if (/未払|預り金|前受|仮受|引当金/.test(n)) return 'clo';
+  if (/現金|預金/.test(n)) return 'cash';
+  if (/^有価証券$|売買目的/.test(n)) return 'sec';
+  if (/売掛金|受取手形|電子記録債権|完成工事未収入金/.test(n)) return 'recv';
+  if (/^商品$|^製品$|原材料|^材料$|仕掛品|半製品|貯蔵品|棚卸資産|未成工事支出金/.test(n)) return 'inv';
+  if (/建設仮勘定/.test(n)) return 'cip';
+  if (/建物|附属設備|構築物|機械|装置|船舶|車両|運搬具|工具|器具|備品|土地|リース資産|減価償却累計|一括償却資産/.test(n)) return 'tang';
+  if (/ソフトウェア|のれん|特許権|商標権|借地権|電話加入権|施設利用権|無形/.test(n)) return 'intg';
+  if (/投資有価証券|関係会社株式|出資金|長期貸付|敷金|保証金|差入|長期前払|保険積立|繰延税金資産|破産更生|投資不動産/.test(n)) return 'invst';
+  if (/繰延資産|創立費|開業費|開発費|株式交付費|社債発行費/.test(n)) return 'def';
+  if (/前払|未収|立替|仮払|短期貸付|前渡|預け金/.test(n)) return 'oca';
+  return 'unk';
+}
+// 貸借対照表のひとまとまり（科目＋書類上の合計）
+function bsSnap(rawItems, opts = {}) {
+  const items = [], doc = {};
+  for (const x of rawItems) {
+    const n = normName(x.name); if (!n || x.amount == null || Number.isNaN(x.amount)) continue;
+    const dt = DOC_TOTALS.find(([re]) => re.test(n));
+    if (dt) { if (doc[dt[1]] == null) doc[dt[1]] = x.amount; continue; }
+    const g = bsGroupOf(n); if (!g) continue;
+    const amount = CONTRA.test(n) && x.amount > 0 ? -x.amount : x.amount;
+    const ex = items.find(y => y.name === n);
+    if (ex) { if (opts.sumDup) ex.amount += amount; continue; }
+    items.push({ name: n, amount, g });
+  }
+  const s = gs => items.filter(x => gs.includes(x.g)).reduce((t, x) => t + x.amount, 0);
+  const v = { cash: s(['cash']), sec: s(['sec']), recv: s(['recv']), inv: s(['inv']), oca: s(['oca']), tang: s(['tang', 'cip']), cip: s(['cip']), intg: s(['intg']), invst: s(['invst']), def: s(['def']), pay: s(['pay']), debtS: s(['debtS']), clo: s(['clo']), debtL: s(['debtL']), flo: s(['flo']), unk: s(['unk']) };
+  const calc = { CA: v.cash + v.sec + v.recv + v.inv + v.oca, FA: v.tang + v.intg + v.invst, DA: v.def, CL: v.pay + v.debtS + v.clo, FL: v.debtL + v.flo, EQ: s(['eq']) };
+  calc.TA = calc.CA + calc.FA + calc.DA; calc.TL = calc.CL + calc.FL;
+  const mism = [];
+  const lbl = { CA: '流動資産合計', FA: '固定資産合計', DA: '繰延資産合計', TA: '資産合計', CL: '流動負債合計', FL: '固定負債合計', TL: '負債合計', EQ: '純資産合計' };
+  for (const k of Object.keys(lbl)) {
+    if (doc[k] != null && Math.abs(doc[k] - calc[k]) >= 1) mism.push(`${lbl[k]}：書類 ${yenRaw(doc[k])}円／科目の合計 ${yenRaw(calc[k])}円`);
+    if (doc[k] != null) v[k] = doc[k]; else v[k] = calc[k];
+  }
+  if (opts.eqDerived) { v.EQ = v.TA - v.TL; }   // 試算表：当期の損益が純資産に振り替わっていないため差引で求める
+  const tle = doc.TLE ?? (v.TL + v.EQ);
+  if (Math.abs(v.TA - tle) >= 1) mism.push(`資産合計 ${yenRaw(v.TA)}円 と 負債純資産合計 ${yenRaw(tle)}円 が一致しません`);
+  const unk = items.filter(x => x.g === 'unk');
+  v.debt = v.debtS + v.debtL; v.quick = v.cash + v.sec + v.recv; v.liquid = v.cash + v.sec;
+  v.opCap = v.TA - v.cip - v.invst - v.def;
+  return { items, v, doc, calc, mism, unk, eqDerived: !!opts.eqDerived, label: opts.label };
+}
+function bsFromFS(fy) { const a = S.annual?.[fy]; return a?.bsItems ? bsSnap(a.bsItems, { label: `${fyLabel(fy)}末（決算書）` }) : null; }
+function bsFromTB(fy, i, which) {
+  const t = S.tb?.[fy]?.[i]; if (!t) return null;
+  const rows = t.rows.map(r => ({ a: accById(r.acc), v: r[which] })).filter(x => x.a?.cat === 'bs' && x.v != null);
+  if (!rows.length) return null;
+  const when = which === 'open' ? (i === 0 ? `${fyLabel(fy)}期首` : `${yearOf(fy, i)}年${mLabel(i)}初`) : `${yearOf(fy, i)}年${mLabel(i)}末`;
+  return bsSnap(rows.map(x => ({ name: x.a.name, amount: x.v })), { eqDerived: true, sumDup: true, label: `${when}（試算表）` });
+}
+// 損益の主要な数値（科目ごとの金額を返す関数から）
+function plFig(valFn) {
+  const rows = plRows(a => { const arr = nulls(); arr[0] = valFn(a); return arr; });
+  const g = k => { const r = rowByKey(rows, k); return r ? (sumN(r.vals) ?? 0) : null; };
+  const byName = (cats, re) => S.accounts.filter(a => cats.includes(a.cat) && re.test(normName(a.name))).reduce((s, a) => s + (valFn(a.id) || 0), 0);
+  const ord = g('ord') ?? 0, spi = g('sub_spi') ?? 0, spl = g('sub_spl') ?? 0, ctax = g('sub_ctax') ?? 0;
+  const pre = g('pre') ?? (ord + spi - spl);
+  return {
+    sales: g('sub_sales') ?? 0, cogs: g('sub_cogs') ?? 0, gross: g('gross') ?? 0, op: g('op') ?? 0, ord, pre, ctax, net: g('net') ?? (pre - ctax),
+    intInc: byName(['noi'], /受取利息|受取配当|有価証券利息/), intExp: byName(['noe'], /支払利息|割引料|社債利息/), dep: byName(['cogs', 'sga'], /減価償却|償却費/),
+    any: S.accounts.some(a => isPL(a) && valFn(a.id)),
+  };
+}
+function finCtx(fy, basis, m, avgMode) {
+  const ctx = { fy, basis, notes: [] };
+  if (basis === 'fs') {
+    ctx.B1 = bsFromFS(fy); if (!ctx.B1) return null;
+    ctx.B0 = bsFromFS(fy - 1) || bsFromTB(fy, 0, 'open');
+    const pl = S.annual[fy].pl || {};
+    ctx.pl = plFig(id => pl[id] ?? null); ctx.months = 12; ctx.title = `${fyLabel(fy)}（決算書）`;
+  } else {
+    ctx.B1 = bsFromTB(fy, m, 'close'); if (!ctx.B1) return null;
+    ctx.B0 = bsFromFS(fy - 1) || bsFromTB(fy, 0, 'open');
+    const last = lastIdx(fy);
+    ctx.pl = plFig(id => sumN(actualLine(fy, id).slice(0, m + 1)));
+    ctx.months = m + 1; ctx.title = `${fyLabel(fy)} ${mLabel(0)}〜${mLabel(m)}（試算表・${m + 1}か月）`;
+    if (last < m) ctx.notes.push(`損益の実績は${last >= 0 ? mLabel(last) : '未登録'}までです。`);
+    if (m < 11) ctx.notes.push(`期中のため、損益・キャッシュフローは12か月分に年換算して比率を計算しています（×12/${m + 1}）。`);
+    ctx.notes.push('試算表の純資産は、当期の損益を含めるため「資産合計−負債合計」で求めています。');
+  }
+  ctx.avg = !!(avgMode && ctx.B0);
+  if (!ctx.pl.any) ctx.notes.push('損益の数値がありません（決算書の損益計算書、または損益の実績を取り込んでください）。');
+  ctx.cf = cashFlow(ctx);
+  return ctx;
+}
+function cashFlow(ctx) {
+  const { B0, B1, pl } = ctx; if (!B0) return null;
+  const sumP = (B, p) => B.items.filter(p).reduce((s, x) => s + x.amount, 0);
+  const D = p => sumP(B1, p) - sumP(B0, p);
+  const allow = x => /引当金/.test(x.name), taxPay = x => /未払法人税|未払法人税等/.test(x.name), cur1 = x => /1年以内|一年以内|1年内/.test(x.name);
+  const L = [];
+  const add = (label, v, cls = '') => { L.push({ label, v, cls }); return v; };
+  add('Ⅰ 営業活動によるキャッシュ・フロー', null, 'head');
+  let op = 0;
+  op += add('税引前当期純利益', pl.pre);
+  op += add('減価償却費', pl.dep);
+  op += add('引当金の増減額', D(x => allow(x) && (x.g === 'clo' || x.g === 'flo')) - D(x => allow(x) && x.g === 'recv'));
+  op += add('受取利息及び受取配当金', -pl.intInc);
+  op += add('支払利息', pl.intExp);
+  op += add('売上債権の増減額', -D(x => x.g === 'recv' && !allow(x)));
+  op += add('棚卸資産の増減額', -D(x => x.g === 'inv'));
+  op += add('仕入債務の増減額', D(x => x.g === 'pay'));
+  op += add('その他の資産・負債の増減額', -D(x => x.g === 'oca') + D(x => (x.g === 'clo' || x.g === 'flo') && !allow(x) && !taxPay(x)));
+  add('小計', op, 'sub');
+  op += add('利息及び配当金の受取額', pl.intInc);
+  op += add('利息の支払額', -pl.intExp);
+  op += add('法人税等の支払額', -(pl.ctax - D(taxPay)));
+  add('営業活動によるキャッシュ・フロー', op, 'total');
+  add('Ⅱ 投資活動によるキャッシュ・フロー', null, 'head');
+  const capex = D(x => ['tang', 'cip', 'intg'].includes(x.g)) + pl.dep;
+  let inv = 0;
+  inv += add('固定資産の取得による支出（売却との純額）', -capex);
+  inv += add('投資その他の資産・有価証券の増減額', -D(x => x.g === 'invst' || x.g === 'sec' || x.g === 'def'));
+  add('投資活動によるキャッシュ・フロー', inv, 'total');
+  add('Ⅲ 財務活動によるキャッシュ・フロー', null, 'head');
+  let fin = 0;
+  fin += add('短期借入金の純増減額', D(x => x.g === 'debtS' && !cur1(x)));
+  fin += add('長期借入金・社債等の純増減額', D(x => x.g === 'debtL' || (x.g === 'debtS' && cur1(x))));
+  fin += add('純資産の増減額（当期純利益を除く：配当・増資など）', (B1.v.EQ - B0.v.EQ) - pl.net);
+  add('財務活動によるキャッシュ・フロー', fin, 'total');
+  const total = op + inv + fin;
+  add('Ⅳ 現金及び現金同等物の増減額', total, 'total');
+  add('Ⅴ 現金及び現金同等物の期首残高', B0.v.cash, 'sub');
+  add('Ⅵ 現金及び現金同等物の期末残高', B0.v.cash + total, 'total');
+  const diff = (B1.v.cash - B0.v.cash) - total;
+  return { lines: L, op, inv, fin, total, capex, diff, cashEnd: B1.v.cash };
+}
+function finIndicators(ctx) {
+  if (!ctx) return null;
+  const { B0, B1, pl } = ctx, k = 12 / ctx.months, av = key => ctx.avg ? (B0.v[key] + B1.v[key]) / 2 : B1.v[key];
+  const r = (n, d) => (n == null || d == null || d <= 0) ? null : n / d;
+  const bal = ctx.avg ? '（期首・期末の平均）' : '（期末）';
+  const A = v => v * k, ann = k !== 1 ? '（年換算）' : '';
+  const sales = A(pl.sales), op = A(pl.op), ord = A(pl.ord), net = A(pl.net), intInc = A(pl.intInc), intExp = A(pl.intExp);
+  const biz = op + intInc, preInt = ord + intExp;
+  const opcf = ctx.cf ? A(ctx.cf.op) : null, capex = ctx.cf ? A(ctx.cf.capex) : null;
+  const I = [];
+  const add = (grp, key, name, val, unit, formula, detail, opt = {}) => I.push({ grp, key, name, val, unit, formula, detail, ...opt });
+  const dv = (a, an, b, bn) => `${a}${an == null ? '—' : yen(an)} ÷ ${b}${bn == null ? '—' : yen(bn)}`;
+  const TAv = av('TA');
+  add('prof', 'opcap', '経営資本営業利益率', r(op, av('opCap')), '%', '営業利益 ÷ 経営資本 ×100　経営資本＝総資産−建設仮勘定−投資その他の資産−繰延資産', dv('営業利益' + ann, op, '経営資本' + bal, av('opCap')));
+  add('prof', 'roa', '総資本事業利益率', r(biz, TAv), '%', '事業利益 ÷ 総資本 ×100　事業利益＝営業利益＋受取利息・配当金', dv('事業利益' + ann, biz, '総資本' + bal, TAv) + `　＝ 売上高事業利益率 ${fmtInd(r(biz, sales), '%')} × 総資本回転率 ${fmtInd(r(sales, TAv), '回')}`);
+  add('prof', 'roaOrd', '総資本経常利益率', r(ord, TAv), '%', '経常利益 ÷ 総資本 ×100', dv('経常利益' + ann, ord, '総資本' + bal, TAv) + `　＝ 売上高経常利益率 ${fmtInd(r(ord, sales), '%')} × 総資本回転率 ${fmtInd(r(sales, TAv), '回')}`, { sub: true });
+  add('prof', 'roaPre', '総資本利払前経常利益率', r(preInt, TAv), '%', '（経常利益＋支払利息・割引料）÷ 総資本 ×100', dv('利払前経常利益' + ann, preInt, '総資本' + bal, TAv) + `　＝ 総資本経常利益率 ${fmtInd(r(ord, TAv), '%')} ＋ 支払利息の総資本比 ${fmtInd(r(intExp, TAv), '%')}`, { sub: true });
+  add('prof', 'roe', '自己資本純利益率（ROE）', r(net, av('EQ')), '%', '当期純利益 ÷ 自己資本（純資産）×100', dv('当期純利益' + ann, net, '自己資本' + bal, av('EQ')) + (av('EQ') <= 0 ? '　自己資本がマイナスのため計算できません' : ''));
+  const turn = (key, name, label) => { const d = av(key), t = r(sales, d); add('prof', key + 'T', name, t, '回', `売上高 ÷ ${label}`, dv('売上高' + ann, sales, label + bal, d) + (t ? `　回転期間 ${(12 / t).toFixed(1)}か月` : '')); };
+  turn('recv', '売上債権回転率', '売上債権（受取手形・売掛金・電子記録債権）');
+  turn('inv', '棚卸資産回転率', '棚卸資産');
+  turn('tang', '有形固定資産回転率', '有形固定資産');
+  turn('pay', '買入債務回転率', '買入債務（支払手形・買掛金・電子記録債務）');
+  const E = B1.v;
+  add('safe', 'cur', '流動比率', r(E.CA, E.CL), '%', '流動資産 ÷ 流動負債 ×100', dv('流動資産', E.CA, '流動負債', E.CL));
+  add('safe', 'quick', '当座比率', r(E.quick, E.CL), '%', '当座資産 ÷ 流動負債 ×100　当座資産＝現金預金＋売上債権＋有価証券', dv('当座資産', E.quick, '流動負債', E.CL));
+  const ms = pl.sales / ctx.months;
+  add('safe', 'liq', '手元流動性', E.liquid, '円', '現金預金＋有価証券（流動資産）', `月商 ${yen(ms)} の ${ms > 0 ? (E.liquid / ms).toFixed(1) : '—'}か月分（手元流動性比率）`);
+  add('safe', 'eqr', '自己資本比率', r(E.EQ, E.TA), '%', '自己資本（純資産）÷ 総資本 ×100', dv('自己資本', E.EQ, '総資本', E.TA));
+  add('safe', 'der', '負債比率', r(E.TL, E.EQ), '%', '負債 ÷ 自己資本 ×100', dv('負債', E.TL, '自己資本', E.EQ) + (E.EQ <= 0 ? '　自己資本がマイナス（債務超過）のため計算できません' : ''));
+  add('safe', 'fix', '固定比率', r(E.FA, E.EQ), '%', '固定資産 ÷ 自己資本 ×100', dv('固定資産', E.FA, '自己資本', E.EQ));
+  add('safe', 'fixl', '固定長期適合比率', r(E.FA, E.EQ + E.FL), '%', '固定資産 ÷（自己資本＋固定負債）×100', dv('固定資産', E.FA, '自己資本＋固定負債', E.EQ + E.FL));
+  add('safe', 'icr', 'インタレスト・カバレッジ・レシオ', intExp > 0 ? biz / intExp : null, '倍', '（営業利益＋受取利息・配当金）÷ 支払利息・割引料', dv('事業利益' + ann, biz, '支払利息・割引料' + ann, intExp) + (intExp > 0 ? '' : '　支払利息がないため計算しません'));
+  const cfNote = ctx.cf ? '' : '　期首の貸借対照表がないため、キャッシュ・フローを計算できません（前期の決算書か、期首残高のある試算表を取り込んでください）';
+  add('safe', 'capexcf', '設備投資対営業CF比率', ctx.cf && opcf > 0 ? capex / opcf : null, '%', '設備投資額 ÷ 営業キャッシュ・フロー ×100', ctx.cf ? dv('設備投資額' + ann, capex, '営業CF' + ann, opcf) + (opcf > 0 ? '' : '　営業CFがマイナスのため計算できません') : cfNote);
+  add('safe', 'payback', '有利子負債返済年数', ctx.cf && opcf > 0 ? E.debt / opcf : null, '年', '有利子負債 ÷ 営業キャッシュ・フロー　有利子負債＝借入金＋社債＋リース債務など', ctx.cf ? dv('有利子負債', E.debt, '営業CF' + ann, opcf) + (opcf > 0 ? '' : '　営業CFがマイナスのため計算できません') : cfNote);
+  return I;
+}
+function fmtInd(v, unit) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  if (unit === '%') return (v * 100).toFixed(1) + '%';
+  if (unit === '回') return v.toFixed(2) + '回';
+  if (unit === '倍') return v.toFixed(2) + '倍';
+  if (unit === '年') return v.toFixed(1) + '年';
+  if (unit === '円') return yen(v) + (unitK() ? '千円' : '円');
+  return String(v);
+}
+function finMonths(fy) { return Object.keys(S.tb?.[fy] || {}).map(Number).filter(i => S.tb[fy][i].rows.some(r => accById(r.acc)?.cat === 'bs' && r.close != null)).sort((a, b) => a - b); }
+function viewFin(main) {
+  const fy = ui.fy, f = ui.fin ||= { basis: null, m: null, avg: true };
+  const fsOk = !!S.annual?.[fy]?.bsItems, tbM = finMonths(fy);
+  if (!f.basis || (f.basis === 'fs' && !fsOk && tbM.length) || (f.basis === 'tb' && !tbM.length)) f.basis = fsOk ? 'fs' : 'tb';
+  if (f.basis === 'tb' && !tbM.includes(f.m)) f.m = tbM[tbM.length - 1];
+  const oldFs = Object.entries(S.annual || {}).filter(([, a]) => a && !a.bsItems).map(([y]) => fyLabel(+y));
+  const controls = `<div class="form-grid">
+    <div class="field"><label for="fnB">分析の元データ</label><select id="fnB"><option value="fs" ${f.basis === 'fs' ? 'selected' : ''} ${fsOk ? '' : 'disabled'}>決算書（${fyLabel(fy)}）${fsOk ? '' : '：未取込'}</option><option value="tb" ${f.basis === 'tb' ? 'selected' : ''} ${tbM.length ? '' : 'disabled'}>試算表（月末時点）${tbM.length ? '' : '：未取込'}</option></select></div>
+    ${f.basis === 'tb' && tbM.length ? `<div class="field"><label for="fnM">試算表の月</label><select id="fnM">${tbM.map(i => `<option value="${i}" ${i === f.m ? 'selected' : ''}>${yearOf(fy, i)}年${mLabel(i)}末</option>`).join('')}</select></div>` : ''}
+    <div class="field"><label for="fnAvg">回転率・利益率の資産の額</label><select id="fnAvg"><option value="1" ${f.avg ? 'selected' : ''}>期首と期末の平均</option><option value="0" ${!f.avg ? 'selected' : ''}>期末の額</option></select></div>
+  </div>`;
+  const ctx = finCtx(fy, f.basis, f.m, f.avg);
+  if (!ctx) {
+    main.innerHTML = `<div class="stack"><div class="card stack"><h2>財務分析</h2>${controls}
+      <p>財務分析には、貸借対照表の数値が必要です。「データ取込」で、${fyLabel(fy)}の<strong>決算書</strong>（貸借対照表・損益計算書）か、<strong>試算表</strong>（貸借対照表の科目を含むもの）を取り込んでください。</p>
+      <p class="small muted">キャッシュ・フロー計算書と、営業キャッシュ・フローを使う指標には、期首の貸借対照表（前期の決算書、または期首残高のある試算表）も必要です。</p>
+      ${oldFs.length ? `<div class="notice warn">${icon('triangle-alert')}<span>${oldFs.join('、')}の決算書は、貸借対照表を保存する前の版で取り込まれています。お手数ですが、もう一度取り込んでください。</span></div>` : ''}
+      <div class="row"><button class="btn primary" data-go="import">${icon('file-input')}データ取込へ</button></div></div></div>`;
+    return;
+  }
+  const I = finIndicators(ctx);
+  const pctx = f.basis === 'fs' ? finCtx(fy - 1, 'fs', null, f.avg) : null;
+  const PI = pctx ? finIndicators(pctx) : null;
+  const prevVal = key => PI?.find(x => x.key === key)?.val ?? null;
+  const tbl = grp => `<div class="tbl-wrap"><table class="tbl fin"><thead><tr><th>指標</th><th>${esc(ctx.title.replace(/（.*$/, ''))}</th>${PI ? `<th>${fyLabel(fy - 1)}</th>` : ''}<th style="text-align:left" class="hide-sm">計算式</th></tr></thead><tbody>
+    ${I.filter(x => x.grp === grp).map(x => `<tr class="${x.sub ? 'ind-sub' : ''}"><td class="rowh">${x.sub ? '└ ' : ''}${esc(x.name)}<div class="small muted wrap">${esc(x.detail)}</div></td><td class="num" style="font-weight:700">${fmtInd(x.val, x.unit)}</td>${PI ? `<td class="num">${fmtInd(prevVal(x.key), x.unit)}</td>` : ''}<td class="small muted wrap hide-sm" style="min-width:240px">${esc(x.formula)}</td></tr>`).join('')}
+  </tbody></table></div>`;
+  const warn = [...ctx.notes];
+  for (const [B, l] of [[ctx.B1, '期末'], [ctx.B0, '期首']]) if (B) {
+    B.mism.forEach(m => warn.push(`${l}：${m}`));
+    if (B.unk.length) warn.push(`${l}の貸借対照表に分類できない科目があります（${B.unk.map(x => x.name).join('、')}）。下の「科目の分類」で区分を選んでください。`);
+  }
+  if (!ctx.B0) warn.push('期首の貸借対照表がないため、回転率などは期末の額で計算し、キャッシュ・フロー計算書は作成できません。');
+  if (pctx && f.avg && !pctx.avg) warn.push(`${fyLabel(fy - 1)}の列は、その期首の貸借対照表（${fyLabel(fy - 2)}の決算書）がないため、期末の額で計算しています。当期の列とは計算方法が異なります。`);
+  const cf = ctx.cf;
+  const cfP = pctx?.cf;
+  const bsRows = [['流動資産', 'CA'], ['　現金及び預金', 'cash'], ['　売上債権', 'recv'], ['　棚卸資産', 'inv'], ['固定資産', 'FA'], ['　有形固定資産', 'tang'], ['　無形固定資産', 'intg'], ['　投資その他の資産', 'invst'], ['繰延資産', 'DA'], ['資産合計（総資本）', 'TA'], ['流動負債', 'CL'], ['　買入債務', 'pay'], ['固定負債', 'FL'], ['負債合計', 'TL'], ['　うち有利子負債', 'debt'], ['純資産（自己資本）', 'EQ']];
+  const allItems = [...new Map([...(ctx.B0?.items || []), ...ctx.B1.items].map(x => [x.name, x])).values()];
+  main.innerHTML = `<div class="stack">
+    <div class="card stack"><div class="card-hd" style="margin:0"><h2>財務分析　${esc(ctx.title)}</h2><button class="btn sm" data-act="csvFin">${icon('file-down')}CSV出力</button></div>${controls}
+      <p class="small muted">期末：${esc(ctx.B1.label)}　／　期首：${ctx.B0 ? esc(ctx.B0.label) : 'なし'}　／　損益：${f.basis === 'fs' ? '決算書の損益計算書' : `損益の実績（${mLabel(0)}〜${mLabel(f.m)}）`}　／　${unitNote()}</p></div>
+    ${warn.map(w => `<div class="notice warn">${icon('triangle-alert')}<span>${esc(w)}</span></div>`).join('')}
+    <div class="card"><div class="card-hd"><h2>収益性分析</h2></div>${tbl('prof')}</div>
+    <div class="card"><div class="card-hd"><h2>安全性分析</h2></div>${tbl('safe')}
+      <p class="small muted" style="margin-top:8px">安全性の比率は期末の貸借対照表で計算しています。「—」はデータ不足または計算できない場合です（理由は各行の説明に表示）。</p></div>
+    <div class="card"><div class="card-hd"><h2>キャッシュ・フロー計算書（間接法）</h2><span class="small muted">${unitNote()}</span></div>
+      ${cf ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>区分</th><th>${esc(ctx.title.replace(/（.*$/, ''))}</th>${cfP ? `<th>${fyLabel(fy - 1)}</th>` : ''}</tr></thead><tbody>
+        ${cf.lines.map((l, i) => `<tr class="${l.cls}"><td class="rowh">${esc(l.label)}</td><td class="num">${l.v == null ? '' : yen(l.v)}</td>${cfP ? `<td class="num">${cfP.lines[i]?.v == null ? '' : yen(cfP.lines[i].v)}</td>` : ''}</tr>`).join('')}
+        <tr class="chk"><td class="rowh">検算：貸借対照表の現金及び預金（期末）</td><td class="num">${yen(cf.cashEnd)} ${Math.abs(cf.diff) < 1 ? `<span class="good">${icon('check')}一致</span>` : `<span class="bad">差額 ${yenSigned(-cf.diff)}</span>`}</td>${cfP ? `<td class="num">${yen(cfP.cashEnd)} ${Math.abs(cfP.diff) < 1 ? `<span class="good">${icon('check')}一致</span>` : `<span class="bad">差額 ${yenSigned(-cfP.diff)}</span>`}</td>` : ''}</tr>
+      </tbody></table></div>
+      <p class="small muted" style="margin-top:8px">期首と期末の貸借対照表の増減と損益計算書から作成しています（間接法）。固定資産の取得は「固定資産の増加＋減価償却費」で求めた売却との純額です。現金及び現金同等物は「現金及び預金」としています。${Math.abs(cf.diff) >= 1 ? '<strong>差額がある場合は、科目の分類（未分類の科目）や、書類の合計と科目の合計の不一致を確認してください。</strong>' : ''}</p>`
+      : `<p class="small muted">期首の貸借対照表がないため作成できません。前期（${fyLabel(fy - 1)}）の決算書、または期首残高（前月残高）の列がある試算表を取り込んでください。</p>`}
+    </div>
+    <div class="card"><div class="card-hd"><h2>要約貸借対照表</h2><span class="small muted">${unitNote()}</span></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>区分</th>${ctx.B0 ? '<th>期首</th>' : ''}<th>期末</th>${ctx.B0 ? '<th>増減</th>' : ''}</tr></thead><tbody>
+      ${bsRows.map(([l, k]) => `<tr class="${l.startsWith('　') ? 'acc' : 'sub'}"><td class="rowh">${l.trim()}</td>${ctx.B0 ? `<td class="num">${yen(ctx.B0.v[k])}</td>` : ''}<td class="num">${yen(ctx.B1.v[k])}</td>${ctx.B0 ? `<td class="num">${yenSigned(ctx.B1.v[k] - ctx.B0.v[k])}</td>` : ''}</tr>`).join('')}
+      </tbody></table></div>
+      <details style="margin-top:8px" ${allItems.some(x => x.g === 'unk') ? 'open' : ''}><summary>${icon('list-tree')}科目の分類（${allItems.length}科目・変更すると全期間に反映）</summary>
+        <div class="tbl-wrap" style="margin-top:8px;max-height:420px"><table class="tbl"><thead><tr><th>科目</th>${ctx.B0 ? '<th>期首</th>' : ''}<th>期末</th><th style="text-align:left">区分</th></tr></thead><tbody>
+        ${allItems.map(x => { const b0 = ctx.B0?.items.find(y => y.name === x.name)?.amount, b1 = ctx.B1.items.find(y => y.name === x.name)?.amount; return `<tr class="${x.g === 'unk' ? 'unc' : ''}"><td class="rowh">${esc(x.name)}</td>${ctx.B0 ? `<td class="num">${yen(b0 ?? null)}</td>` : ''}<td class="num">${yen(b1 ?? null)}</td><td><select data-bsg="${esc(x.name)}" aria-label="${esc(x.name)}の区分" style="min-height:40px">${Object.entries(BSG).map(([g, l]) => `<option value="${g}" ${g === x.g ? 'selected' : ''}>${BS_SIDE[g] === 'A' ? '資産：' : BS_SIDE[g] === 'L' ? '負債：' : ''}${l}</option>`).join('')}</select></td></tr>`; }).join('')}
+        </tbody></table></div>
+        <p class="small muted">減価償却累計額・貸倒引当金・自己株式は、マイナスとして扱います。「借入金」とだけ書かれた科目は長期として扱います（短期の場合は区分を変更してください）。</p></details>
+    </div>
+  </div>`;
+}
+function csvFin() {
+  const f = ui.fin, ctx = finCtx(ui.fy, f.basis, f.m, f.avg); if (!ctx) return;
+  const I = finIndicators(ctx);
+  const rows = [['財務分析', ctx.title], [], ['指標', '値', '単位', '計算式', '計算に使った値'], ...I.map(x => [x.name, x.val == null ? '' : (x.unit === '%' ? +(x.val * 100).toFixed(2) : +x.val.toFixed(2)), x.unit, x.formula, x.detail])];
+  if (ctx.cf) { rows.push([], ['キャッシュ・フロー計算書（間接法）', '金額（円）']); ctx.cf.lines.forEach(l => rows.push([l.label, l.v ?? ''])); rows.push(['検算差額', Math.round(-ctx.cf.diff)]); }
+  return download(`財務分析_${fyLabel(ui.fy)}_${stamp()}.csv`, '﻿' + toCsv(rows), 'text/csv');
+}
+
 /* ---------- 設定・データ ---------- */
 function viewSettings(main) {
   const st = S.settings, fy = ui.fy;
@@ -2615,7 +2898,7 @@ document.addEventListener('click', ev => {
   const act = ds.act;
   if (!act) return;
   const acts = {
-    csvPL, csvCash,
+    csvPL, csvCash, csvFin,
     exportCsv: exportEntriesCsv, importCsv: importCsvFlow, exportJson, importJson: () => importJsonFlow(),
     cancelEdit: () => { ui.editId = null; render(); },
     clearFilter: () => { ui.d = { from: 0, to: 11, cat: '', acc: '', q: '', limit: 200 }; render(); },
@@ -2652,6 +2935,10 @@ document.addEventListener('change', ev => {
   if (t.id === 'rvLearn') { ui.learn = t.checked; return; }
   if (t.id === 'useDefRules') { S.settings.useDefaultRules = t.checked; reclassifyAll(); save('分類ルールを更新しました'); render(); return; }
   if (ds.txkey) { setTxKey(ds.txkey, t.value); return; }
+  if (t.id === 'fnB') { ui.fin.basis = t.value; render(); return; }
+  if (t.id === 'fnM') { ui.fin.m = +t.value; render(); return; }
+  if (t.id === 'fnAvg') { ui.fin.avg = t.value === '1'; render(); return; }
+  if (ds.bsg) { S.bsGroups[normName(ds.bsg)] = t.value; save(`「${ds.bsg}」の区分を変更しました`); render(); return; }
   if (['dFrom', 'dTo', 'dCat', 'dAcc'].includes(t.id)) {
     const k = { dFrom: 'from', dTo: 'to', dCat: 'cat', dAcc: 'acc' }[t.id];
     ui.d[k] = (k === 'from' || k === 'to') ? +t.value : t.value;
