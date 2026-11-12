@@ -166,3 +166,8 @@
 - Excel読み取り：SheetJS 0.18.5（cdnjs。Excelを取り込むときだけ読み込み）
 
 通信できない環境ではグラフ・アイコン・PDF読み取りが使えませんが、表と入力、CSV取込はそのまま使えます。
+
+## AI エージェントでの開発（Codex・Claude Code）
+
+- 作業ルール（データを消さない、実データを入れない、デザインのルール、動作確認のしかた、報告のしかた）は `AGENTS.md` にまとめています。Codex は `AGENTS.md` を自動で読みます。Claude Code は `CLAUDE.md` から同じ `AGENTS.md` を読み込みます。
+- `AGENTS.md` の「Code Review Rules」は、Codex が GitHub の pull request をレビューするときの確認項目です。
