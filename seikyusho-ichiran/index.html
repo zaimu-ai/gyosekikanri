@@ -179,6 +179,7 @@ legend{font-weight:700;padding:0 4px}
       <h2 id="h-list" style="margin-right:auto">一覧</h2>
       <div class="seg" role="group" aria-label="表示する内容" id="viewSeg">
         <button type="button" data-v="inv" aria-pressed="true">請求書</button>
+        <button type="button" data-v="items" aria-pressed="false">明細（品目）</button>
         <button type="button" data-v="pages" aria-pressed="false">ページの内訳</button>
       </div>
     </div>
@@ -257,6 +258,21 @@ const Core = (() => {
     if (!s) return '';
     return Z2H(String(s)).replace(/株式会社|有限会社|合同会社|合資会社|\(株\)|\(有\)|㈱|㈲|御中|様|殿|\s/g, '').toLowerCase();
   }
+  // 明細行の日付（"10/01" "09.29" "261014" "26/10/06" など）。年がないときは請求書の日付の年で補う
+  function normLineDate(v, ref) {
+    if (v == null || v === '') return null;
+    const d = normDate(v); if (d) return d;
+    const s = Z2H(String(v)).trim().replace(/\s/g, '');
+    let m = s.match(/^(\d{2})(\d{2})(\d{2})$/);
+    if (m) return normDate(`20${m[1]}/${m[2]}/${m[3]}`);
+    m = s.match(/^(\d{1,2})[\/.\-月](\d{1,2})日?$/);
+    if (m && ref) {
+      const ry = +ref.slice(0, 4), rm = +ref.slice(5, 7), mo = +m[1];
+      const y = mo > rm + 1 ? ry - 1 : (rm === 12 && mo === 1 ? ry + 1 : ry);
+      return normDate(`${y}/${mo}/${m[2]}`);
+    }
+    return null;
+  }
   function sameIssuer(a, b) {
     if (!a || !b) return true;   // 片方が不明なら続きとみなす（後で人が直せる）
     if (a.regNo && b.regNo && /^T\d{13}$/.test(a.regNo) && /^T\d{13}$/.test(b.regNo)) return a.regNo === b.regNo;
@@ -282,7 +298,7 @@ const Core = (() => {
       handwritten: str(r.handwritten), unreadable: str(r.unreadable),
       taxRates: (Array.isArray(r.taxRates) ? r.taxRates : []).map(t => ({ rate: toNumF(t && t.rate), base: toNum(t && t.base), tax: toNum(t && t.tax) })).filter(t => t.rate != null && (t.base != null || t.tax != null)),
       lines: (Array.isArray(r.lines) ? r.lines : []).map(l => ({
-        date: str(l && l.date), slip: str(l && l.slip), item: str(l && l.item), qty: toNumF(l && l.qty), unit: str(l && l.unit),
+        date: str(l && l.date), slip: str(l && l.slip), item: str(l && l.item), qty: toNumF(l && l.qty), unit: str(l && l.unit), pieces: toNumF(l && l.pieces),
         price: toNumF(l && l.price), amount: toNum(l && l.amount), rate: toNumF(l && l.rate),
       })).filter(l => l.item || l.amount != null),
     };
@@ -385,7 +401,27 @@ const Core = (() => {
     const lines = [];
     for (const p of main) for (const l of p.res.lines) lines.push({ ...l, kind: '請求書', p: p.p });
     for (const p of det) for (const l of p.res.lines) lines.push({ ...l, kind: '別紙明細', p: p.p });
-    return { f, computed, lines, notes };
+    // 品目一覧に使う行：表紙と別紙の両方に行があるときは、金額の合計が今回買上額に合う方（どちらも合えば品目の分かる別紙）を使う。二重に数えない。
+    const target = [f.net, f.gross].filter(v => v != null);
+    const sumOf = arr => arr.reduce((t, l) => t + (l.amount || 0), 0);
+    const mainL = lines.filter(l => l.kind === '請求書'), detL = lines.filter(l => l.kind === '別紙明細');
+    const fits = arr => arr.length && target.includes(sumOf(arr));
+    const useDet = detL.length && (fits(detL) || !fits(mainL) && (!mainL.length || detL.length > mainL.length));
+    const ref = f.closingDate || f.issueDate;
+    let prev = null;
+    const items = [];
+    for (const l of lines) {
+      l.used = useDet ? l.kind === '別紙明細' : l.kind === '請求書';
+      if (!l.used) continue;
+      const it = { ...l };
+      // 同じ伝票の続きの行で省略された日付・伝票番号を上の行から補う（同じページ内・同じ書類の続きのみ）
+      if (prev && prev.p === it.p && !it.date && (!it.slip || it.slip === prev.slip)) { it.date = prev.date; it.filled = true; }
+      if (prev && prev.p === it.p && !it.slip && it.date === prev.date) { it.slip = prev.slip; it.filled = true; }
+      it.dateN = normLineDate(it.date, ref);
+      it.calcNg = it.qty != null && it.price != null && it.amount != null && ![1, 1000, 0.001].some(k => Math.abs(it.qty * it.price / k - it.amount) <= Math.max(1, Math.abs(it.amount) * 0.001));
+      items.push(it); prev = it;
+    }
+    return { f, computed, lines, items, notes };
     function first(arr, k) { for (const p of arr) if (p.res[k] != null) return p.res[k]; return null; }
   }
   const yen = n => n == null ? '—' : (n < 0 ? '−' : '') + Math.abs(n).toLocaleString('ja-JP');
@@ -417,15 +453,15 @@ const Core = (() => {
     };
     if (f.t10base != null || f.t8base != null) { taxChk(f.t10base, f.t10tax, 10, '10％の'); taxChk(f.t8base, f.t8tax, 8, '8％の'); }
     else if (f.net != null && f.tax != null && f.net > 0 && Math.abs(f.tax - f.net * 0.1) > 1 && Math.abs(f.tax - f.net * 0.08) > 1) W(`消費税 ${yen(f.tax)} が税抜額の10％・8％のどちらとも合いません。税率の内訳を確認してください。`);
-    const L = inv.lines.filter(l => l.amount != null);
-    const sumOf = arr => arr.reduce((s, l) => s + l.amount, 0);
-    const mainL = L.filter(l => l.kind === '請求書'), detL = L.filter(l => l.kind === '別紙明細');
+    const items = inv.items || [];
     const target = [f.net, f.gross].filter(v => v != null);
-    if (target.length) {
-      const s1 = mainL.length ? sumOf(mainL) : null, s2 = detL.length ? sumOf(detL) : null;
-      const okSum = [s1, s2].some(s => s != null && target.includes(s));
-      if ((s1 != null || s2 != null) && !okSum) W(`明細の金額の合計 ${yen(s1 ?? s2)} が今回買上額 ${yen(f.net ?? f.gross)} と一致しません。明細の読み取りを確認してください。`);
+    if (items.length && target.length) {
+      const s1 = items.reduce((s, l) => s + (l.amount || 0), 0);
+      if (!target.includes(s1)) W(`明細の金額の合計 ${yen(s1)} が今回買上額 ${yen(f.net ?? f.gross)} と一致しません（差 ${yen(s1 - (f.net ?? f.gross))}）。明細の読み取りを確認してください。`);
     }
+    const ng = items.map((l, i) => l.calcNg ? i + 1 : 0).filter(Boolean);
+    if (ng.length) W(`明細 ${ng.slice(0, 8).join('・')}${ng.length > 8 ? ' ほか' : ''} 行目で「数量×単価」が金額と合いません。`);
+    if (items.some(l => l.date && !l.dateN)) W('明細に日付として読めない値があります（Excelには印字のまま出力します）。');
     for (const n of inv.notes || []) W('読み取りの注意：' + n);
     const dups = (others || []).filter(o => o.id !== inv.id && isDup(inv, o));
     if (dups.length) E(`同じ請求書が一覧に${dups.length}件あります（${dups.map(o => `${o.fileName} p.${o.firstPage}`).join('、')}）。二重に計上していないか確認してください。`);
@@ -438,7 +474,7 @@ const Core = (() => {
     if (a.f.invoiceNo && b.f.invoiceNo) return a.f.invoiceNo === b.f.invoiceNo && a.f.total === b.f.total;
     return a.f.total != null && a.f.total === b.f.total && (a.f.closingDate || a.f.issueDate) === (b.f.closingDate || b.f.issueDate);
   }
-  return { toNum, toNumF, normDate, normRegNo, regNoValid, normName, sameIssuer, cleanResult, groupPages, derive, checks, FIELDS, AMT, STR, KINDS, yen, Z2H };
+  return { normLineDate, toNum, toNumF, normDate, normRegNo, regNoValid, normName, sameIssuer, cleanResult, groupPages, derive, checks, FIELDS, AMT, STR, KINDS, yen, Z2H };
 })();
 /*CORE-END*/
 </script>
@@ -563,7 +599,7 @@ const PROMPT = `画像は、日本の会社が取引先から受け取った書�
 {"kind":"invoice|detail|delivery|other","rotation":0,"title":"書類の表題","issuer":"発行元（請求元）の会社名","regNo":"登録番号","recipient":"宛名","invoiceNo":"請求書番号","customerCode":"お客様コード・得意先コード","issueDate":"YYYY-MM-DD","closingDate":"YYYY-MM-DD","dueDate":"YYYY-MM-DD","payMethod":"支払方法","bank":"振込先","pageLabel":"1/3","attachedPages":null,
 "amounts":{"prevBilled":null,"received":null,"adjust":null,"carryOver":null,"net":null,"tax":null,"gross":null,"other":null,"total":null,"taxIncluded":false},
 "taxRates":[{"rate":10,"base":0,"tax":0}],
-"lines":[{"date":"MM/DD","slip":"伝票番号","item":"品名・規格・内容","qty":0,"unit":"単位","price":0,"amount":0,"rate":10}],
+"lines":[{"date":"10/01","slip":"伝票番号","item":"規格・品名・寸法","qty":0,"unit":"kg","pieces":null,"price":0,"amount":0,"rate":10}],
 "handwritten":"","unreadable":""}
 
 書類の種類（kind）：
@@ -581,7 +617,14 @@ rotation：文字が正しい向きで読めるようにするには、この画
 - amounts：prevBilled＝前回御請求額、received＝今回の御入金額、adjust＝調整額・相殺・値引額、carryOver＝繰越額、net＝今回御買上額（税抜）、tax＝消費税額、gross＝今回御買上額（税込）、other＝金利など、その他の加算額、total＝今回御請求額（お支払いいただく合計。「ご請求金額」「合計」など）。
 - 金額が税込で表示され「内消費税」とある場合は taxIncluded を true にし、税込の金額を gross に、内消費税を tax に入れる。
 - taxRates：税率ごとの対象額（税抜）と消費税額の記載があれば入れる。
-- lines：今回の買上・請求の品目の行だけ。入金・振込・相殺・振込手数料・消費税・小計・合計・繰越の行、勤務時間などの勤怠の行は入れない。値引きの行は負の数で入れる。表紙（鑑）に「整備代」「部品代」など別紙明細ごとの金額の一覧があれば、その行を入れる。
+- lines：今回の買上・請求の品目の行を、印字の順にすべて。入金・振込・相殺・振込手数料・消費税・小計・合計・繰越の行、「【使用部品】」のような見出しだけの行、勤務時間などの勤怠の行は入れない。値引きの行は負の数で入れる。表紙（鑑）に「整備代」「部品代」など別紙明細ごとの金額の一覧があれば、その行を入れる。
+  - date：その行の日付（伝票日付・出荷日・納品日・売上日など）を印字のまま（例 "10/01"、"09.29"、"26/10/06"、"261014"）。
+  - slip：伝票番号・納品書番号・売上No・受注伝票No など。
+  - item：規格・品名・寸法・品番・図番など、商品を表す情報をまとめて1つの文字列に（例 "SS400H t4.5x120x470 12-277-3"）。担当者名・派遣スタッフ名などの人名は入れない。
+  - qty：単価を掛ける数量。重量で単価が決まる場合は重量（例 330.0kg×240円なら 330）。unit はその単位。
+  - pieces：qty とは別に個数・枚数・員数の欄があればその数。なければ null。
+  - price：単価（印字のまま）。amount：その行の金額。
+  - 同じ伝票の2行目以降で日付・伝票番号が省略されているときは、上の行と同じ値を入れる。行ごとの日付・伝票番号がなく、ページ全体の伝票番号（明細書番号）・計上日・納品日が書かれているときは、その値を各行に入れる。
 - attachedPages：「別紙明細書3枚」のように添付の枚数が書かれていればその数、なければ null。
 - handwritten：手書きの書き込み（例「売 ¥1,068,396」）。印字された内容とは分けて、ここにだけ書く。手書きの数字を金額の項目に使わない。なければ ""。
 - unreadable：読めなかった項目、自信のない項目があれば具体的に。なければ ""。
@@ -766,7 +809,7 @@ function render() {
   S.cache = all;
   renderStats(all);
   renderFilters(all);
-  if (S.ui.view === 'inv') renderInvList(all); else renderPageList();
+  if (S.ui.view === 'inv') renderInvList(all); else if (S.ui.view === 'items') renderItemList(all); else renderPageList();
   drawIcons();
 }
 function renderBanners() {
@@ -828,6 +871,24 @@ function renderInvList(all) {
   </tr>`).join('')}</tbody>
   <tfoot><tr><td></td><td>合計 ${rows.length}件</td><td data-m="hide"></td><td data-m="hide"></td><td class="num" data-m="hide">${yen(sum('net'))}</td><td class="num" data-m="hide">${yen(sum('tax'))}</td><td class="num c-total">${yen(sum('total'))}</td><td data-m="hide" colspan="3"></td></tr></tfoot>
   </table></div>`;
+}
+const fmtNum = v => v == null ? '' : Number(v).toLocaleString('ja-JP', { maximumFractionDigits: 3 });
+function renderItemList(all) {
+  const invs = filtered(all);
+  const rows = invs.flatMap(i => i.items.map(l => ({ i, l })));
+  if (!rows.length) { $('#list').innerHTML = `<div class="empty">${all.length ? '条件に合う明細はありません。' : 'まだ請求書がありません。'}</div>`; return; }
+  const sum = rows.reduce((t, r) => t + (r.l.amount || 0), 0);
+  $('#list').innerHTML = `<p class="small muted" style="margin:0">Excelの「明細一覧」と同じ内容です。日付・伝票Noの「補完」は、印字が省略された行に上の行の値を入れたものです。</p>
+  <div class="tablewrap"><table><thead><tr><th>日付</th><th>伝票No</th><th>規格・品名・寸法等</th><th class="num">数量</th><th class="num">単価</th><th class="num">合計金額</th><th>請求元</th></tr></thead><tbody>
+  ${rows.map(({ i, l }) => `<tr>
+    <td class="num" style="text-align:left">${l.dateN ? fmtDate(l.dateN) : esc(l.date || '—')}${l.filled ? '<br><span class="small muted">補完</span>' : ''}</td>
+    <td>${esc(l.slip || '—')}</td><td>${esc(l.item || '—')}</td>
+    <td class="num">${fmtNum(l.qty)}${l.unit ? `<span class="small muted"> ${esc(l.unit)}</span>` : ''}${l.pieces != null ? `<br><span class="small muted">${fmtNum(l.pieces)}個・枚</span>` : ''}</td>
+    <td class="num">${fmtNum(l.price)}</td>
+    <td class="num">${yen(l.amount)}${l.calcNg ? '<br><span class="small" style="color:var(--warn)">数量×単価と不一致</span>' : ''}</td>
+    <td><button type="button" class="linkcell" data-open="${esc(i.id)}">${esc(i.f.issuer || '請求元不明')}</button><br><span class="small muted">p.${l.p}</span></td></tr>`).join('')}</tbody>
+  <tfoot><tr><td colspan="5">合計 ${rows.length}行（請求書 ${invs.filter(i => i.items.length).length}件）</td><td class="num">${yen(sum)}</td><td></td></tr></tfoot></table></div>
+  ${invs.some(i => !i.items.length) ? `<p class="small" style="margin:0;color:var(--warn)">明細の行がない請求書：${invs.filter(i => !i.items.length).map(i => esc(i.f.issuer || '請求元不明')).join('、')}</p>` : ''}`;
 }
 function renderPageList() {
   const bs = docsOf('batch').filter(b => !b.removed && (S.ui.batch === 'all' || b.id === S.ui.batch)).sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
@@ -897,10 +958,12 @@ async function openInvoice(id) {
   }).join('')}</fieldset>`).join('');
   const chk = checksHtml(inv);
   const roleText = { main: '請求書', cont: '請求書の続き', detail: '別紙明細', ref: '参考（計上しない）' };
-  const lines = inv.lines;
-  const lineHtml = lines.length ? `<div class="tablewrap"><table><thead><tr><th>区分</th><th>日付</th><th>伝票番号</th><th>品名・内容</th><th class="num">数量</th><th>単位</th><th class="num">単価</th><th class="num">金額</th></tr></thead><tbody>
-    ${lines.map(l => `<tr><td class="small">${l.kind}<br>p.${l.p}</td><td class="num" style="text-align:left">${esc(l.date || '')}</td><td>${esc(l.slip || '')}</td><td>${esc(l.item || '')}</td><td class="num">${l.qty ?? ''}</td><td>${esc(l.unit || '')}</td><td class="num">${l.price != null ? l.price.toLocaleString('ja-JP') : ''}</td><td class="num">${yen(l.amount)}</td></tr>`).join('')}
-    </tbody></table></div>` : '<p class="small muted" style="margin:0">明細の行はありません。</p>';
+  const lines = inv.items;
+  const unused = inv.lines.filter(l => !l.used);
+  const lineHtml = lines.length ? `<div class="tablewrap"><table><thead><tr><th>日付</th><th>伝票No</th><th>規格・品名・寸法等</th><th class="num">数量</th><th class="num">単価</th><th class="num">合計金額</th><th>ページ</th></tr></thead><tbody>
+    ${lines.map(l => `<tr><td class="num" style="text-align:left">${l.dateN ? fmtDate(l.dateN) : esc(l.date || '—')}${l.filled ? '<br><span class="small muted">補完</span>' : ''}</td><td>${esc(l.slip || '')}</td><td>${esc(l.item || '')}</td><td class="num">${fmtNum(l.qty)}${l.unit ? `<span class="small muted"> ${esc(l.unit)}</span>` : ''}${l.pieces != null ? `<br><span class="small muted">${fmtNum(l.pieces)}個・枚</span>` : ''}</td><td class="num">${fmtNum(l.price)}</td><td class="num">${yen(l.amount)}${l.calcNg ? '<br><span class="small" style="color:var(--warn)">数量×単価と不一致</span>' : ''}</td><td class="small">p.${l.p}</td></tr>`).join('')}
+    </tbody><tfoot><tr><td colspan="5">合計 ${lines.length}行</td><td class="num">${yen(lines.reduce((t, l) => t + (l.amount || 0), 0))}</td><td></td></tr></tfoot></table></div>
+    ${unused.length ? `<p class="small muted" style="margin:0">${unused[0].kind === '請求書' ? '表紙（鑑）' : '別紙'}の ${unused.length}行は、同じ内容を${unused[0].kind === '請求書' ? '別紙明細' : '表紙'}で数えているため明細一覧に入れていません。</p>` : ''}` : '<p class="small muted" style="margin:0">明細の行はありません。</p>';
   const body = `
     ${chk}
     <div class="detail-grid">
@@ -1061,6 +1124,23 @@ async function exportExcel() {
   try { XL = await loadExcel(); } catch (e) { toast(e.message); return; }
   const wb = new XL.Workbook();
   wb.creator = '請求書一覧'; wb.created = new Date();
+  const MONEY0 = '#,##0;-#,##0';
+  // 1. 明細一覧（ご指定の6項目を A〜F 列に。G 列以降は補足）
+  const wi = wb.addWorksheet('明細一覧', { views: [{ state: 'frozen', ySplit: 1 }] });
+  wi.columns = [['日付', 'date', 11], ['伝票No', 'slip', 16], ['規格・品名・寸法等', 'item', 46], ['数量', 'qty', 10], ['単価', 'price', 11], ['合計金額', 'amount', 13],
+    ['単位', 'unit', 6], ['個数・枚数', 'pieces', 9], ['請求元', 'issuer', 26], ['請求書番号', 'invoiceNo', 13], ['請求日・締日', 'date0', 12], ['確認', 'note', 30], ['ファイル', 'file', 22], ['ページ', 'p', 6]].map(([h, k, w]) => ({ header: h, key: k, width: w }));
+  for (const i of rows) for (const l of i.items) wi.addRow({
+    date: l.dateN ? toXlDate(l.dateN) : (l.date || null), slip: l.slip, item: l.item, qty: l.qty, price: l.price, amount: l.amount,
+    unit: l.unit, pieces: l.pieces, issuer: i.f.issuer, invoiceNo: i.f.invoiceNo, date0: toXlDate(i.f.closingDate || i.f.issueDate),
+    note: [l.calcNg ? '数量×単価が金額と不一致' : '', l.filled ? '日付・伝票Noは上の行から補完' : '', l.date && !l.dateN ? '日付は印字のまま' : ''].filter(Boolean).join('／') || null, file: i.fileName, p: l.p });
+  const iLast = wi.rowCount;
+  const itr = wi.addRow({ item: `合計（${iLast - 1}行）` });
+  itr.getCell('amount').value = { formula: `SUM(F2:F${iLast})`, result: rows.reduce((t, i) => t + i.items.reduce((u, l) => u + (l.amount || 0), 0), 0) };
+  itr.font = { bold: true }; itr.eachCell(c => c.border = { top: { style: 'medium' } });
+  wi.getColumn('date').numFmt = 'yyyy/mm/dd'; wi.getColumn('date0').numFmt = 'yyyy/mm/dd'; wi.getColumn('amount').numFmt = MONEY0;
+  wi.getColumn('qty').numFmt = '#,##0.###'; wi.getColumn('price').numFmt = '#,##0.##'; wi.getColumn('pieces').numFmt = '#,##0.###';
+  wi.getColumn('item').alignment = { wrapText: true, vertical: 'top' };
+  if (iLast > 1) wi.autoFilter = { from: { row: 1, column: 1 }, to: { row: iLast, column: 14 } };
   const head = ws => { const r = ws.getRow(1); r.font = { bold: true }; r.alignment = { vertical: 'middle', wrapText: true }; r.height = 30; r.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7EBF0' } }; c.border = { bottom: { style: 'medium' } }; }); };
   const MONEY = '#,##0;-#,##0', DATE = 'yyyy/mm/dd';
   // 1. 請求書一覧
@@ -1090,13 +1170,7 @@ async function exportExcel() {
   const tr = ws.addRow({ _status: '合計', issuer: `${rows.length}件` });
   cols.forEach((c, ci) => { if (c.t === 'money') { const L = ws.getColumn(ci + 1).letter; tr.getCell(ci + 1).value = { formula: `SUM(${L}2:${L}${last})`, result: rows.reduce((s, i) => s + (i.f[c.k] || 0), 0) }; } });
   tr.font = { bold: true }; tr.eachCell(c => c.border = { top: { style: 'medium' } });
-  head(ws); ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: last, column: cols.length } };
-  // 2. 明細
-  const ws2 = wb.addWorksheet('明細', { views: [{ state: 'frozen', ySplit: 1 }] });
-  ws2.columns = [['請求元', 'issuer', 24], ['請求書番号', 'invoiceNo', 13], ['請求日／締日', 'date0', 12], ['区分', 'kind', 9], ['日付', 'date', 10], ['伝票番号', 'slip', 12], ['品名・内容', 'item', 40], ['数量', 'qty', 8], ['単位', 'unit', 6], ['単価', 'price', 11], ['金額', 'amount', 12], ['税率(%)', 'rate', 7], ['ファイル', 'file', 24], ['ページ', 'p', 6]].map(([h, k, w]) => ({ header: h, key: k, width: w }));
-  for (const i of rows) for (const l of i.lines) ws2.addRow({ issuer: i.f.issuer, invoiceNo: i.f.invoiceNo, date0: toXlDate(i.f.closingDate || i.f.issueDate), kind: l.kind, date: l.date, slip: l.slip, item: l.item, qty: l.qty, unit: l.unit, price: l.price, amount: l.amount, rate: l.rate, file: i.fileName, p: l.p });
-  ws2.getColumn('date0').numFmt = DATE; ws2.getColumn('amount').numFmt = MONEY; ws2.getColumn('price').numFmt = '#,##0.##'; ws2.getColumn('qty').numFmt = '#,##0.###';
-  head(ws2); if (ws2.rowCount > 1) ws2.autoFilter = { from: { row: 1, column: 1 }, to: { row: ws2.rowCount, column: 14 } };
+  head(ws); head(wi); ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: last, column: cols.length } };
   // 3. ページの内訳
   const ws3 = wb.addWorksheet('ページの内訳', { views: [{ state: 'frozen', ySplit: 1 }] });
   ws3.columns = [['ファイル', 'file', 28], ['ページ', 'p', 6], ['書類の種類（AI）', 'kind', 20], ['表題', 'title', 18], ['請求元', 'issuer', 24], ['金額', 'amt', 12], ['扱い', 'role', 16], ['まとめ先（請求元・ページ）', 'to', 26]].map(([h, k, w]) => ({ header: h, key: k, width: w }));
