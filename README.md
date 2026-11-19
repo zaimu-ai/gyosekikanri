@@ -202,3 +202,9 @@
 
 - 作業ルール（データを消さない、実データを入れない、デザインのルール、動作確認のしかた、報告のしかた）は `AGENTS.md` にまとめています。Codex は `AGENTS.md` を自動で読みます。Claude Code は `CLAUDE.md` から同じ `AGENTS.md` を読み込みます。
 - `AGENTS.md` の「Code Review Rules」は、Codex が GitHub の pull request をレビューするときの確認項目です。
+
+## 同じ repository にあるもの：請求システム（`seikyu/`）
+
+- 業績管理とは別のアプリです。アルミ引抜管メーカー向けの請求システム（製作伝票入力 → 納品書 → 合計請求書 → 入金 → 得意先台帳）を `seikyu/` に置いています。業績管理（`index.html`）とはデータも画面も別です。
+- 説明は `seikyu/README.md`、AI エージェントの作業ルールは `seikyu/AGENTS.md` にあります。画面のデザインの仕上げは Codex に依頼しています（`seikyu/docs/codex_design_brief.md`）。
+- 会社の実際の情報（会社名・登録番号・振込先）と取引先のデータは、この repository に入れていません。
