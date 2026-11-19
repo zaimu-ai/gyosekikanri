@@ -4,7 +4,7 @@
 function parseHash() {
   const h = (location.hash || '').replace(/^#/, '');
   if (!h) return { name: 'home' };
-  const m = /^(order|delivery|invoice|customer)-(new|edit-([a-z0-9]+)|([a-z0-9]+))$/.exec(h);
+  const m = /^(order|delivery|invoice|customer|addressee)-(new|edit-([a-z0-9]+)|([a-z0-9]+))$/.exec(h);
   if (m) {
     if (m[2] === 'new') return { name: `${m[1]}-new` };
     if (m[3]) return { name: `${m[1]}-edit`, id: m[3] };
@@ -27,6 +27,9 @@ const ROUTES = {
   ledger: { nav: 'ledger', view: viewLedger, bind: bindLedger },
   customers: { nav: 'customers', view: viewCustomers, bind: bindCustomers },
   'customers-import': { nav: 'customers', view: viewCustomerImport, bind: bindCustomerImport },
+  labels: { nav: 'labels', view: viewLabels, bind: bindLabels },
+  'addressee-new': { nav: 'labels', view: () => viewAddresseeForm(null), bind: () => bindAddresseeForm(null), form: true },
+  addressee: { nav: 'labels', view: r => viewAddresseeForm(r.id), bind: r => bindAddresseeForm(r.id), form: true },
   'customer-new': { nav: 'customers', view: () => viewCustomerForm(null), bind: () => bindCustomerForm(null), form: true },
   customer: { nav: 'customers', view: r => viewCustomerForm(r.id), bind: r => bindCustomerForm(r.id), form: true },
   setup: { nav: 'setup', view: viewSetup, bind: bindSetup, form: true },
@@ -111,6 +114,8 @@ const ACTIONS = {
   oBasis: el => { $('#oBasis').value = el.dataset.v; $$('[data-act=oBasis]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); ui.dirty = true; },
   importCustomersPick: () => $('#ciFile').click(),
   clShow: el => { ui.cl.show = el.dataset.v; render(); },
+  lbAll: el => labelSelectAll(el.dataset.v === '1'),
+  lbPrint: () => openPrintLabels(),
   importCustomersRun: () => importCustomersRun(),
   oInnerKind: el => { $('#oInnerKind').value = el.dataset.v; $$('[data-act=oInnerKind]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); $('label[for=oInner]').firstChild.textContent = `${el.dataset.v === 't' ? '肉厚' : '内径'}（mm）`; $('#oInner').value = ''; $('#oInner').focus(); orderFormCalcHint(); },
   addDest: () => { ui.cf.dests.push({ id: uid(), name: '', address: '', tel: '', active: true }); ui.dirty = true; $('#destRows').innerHTML = ui.cf.dests.map((x, i) => destRowHtml(x, i)).join(''); drawIcons(); focusLater(`#dn${ui.cf.dests.length - 1}`); },

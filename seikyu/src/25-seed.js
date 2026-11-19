@@ -14,6 +14,9 @@ function seedTestData(today = todayStr()) {
   c3.destinations.push({ id: uid(), code: '1', name: '(株)テスト工業 八尾工場', short: 'テスト工業', zip: '', address: '大阪府八尾市（架空）', tel: '', active: true });
   c1.destinations.push({ id: uid(), code: '2', name: '見本金属(株) 第二工場', short: '見本第二', zip: '', address: '', tel: '', active: true });
   d.customers.push(c1, c2, c3, c4, c5);
+  // 宛名（仕入先など。ラベル印刷のためだけ）。1件は住所が空欄（選べない例）
+  const ad = (code, name, zip, address, extra = {}) => ({ id: uid(), code, kana: '', name, honorific: '', zip, address, address2: '', tel: '', fax: '', memo: '', active: true, needsCheck: [], createdAt: nowIso(), updatedAt: nowIso(), ...extra });
+  d.addressees.push(ad(901, '見本資材(株)', '000-0002', '架空県見本市2-3-4', { address2: '見本ビル3階' }), ad(902, '架空梱包(有)', '000-0003', '架空県試験町5-6'), ad(903, '試験塗料(株)', '', '', { needsCheck: ['住所1', '電話番号'] }));
 
   // 日付は「今日」から決める（いつ開いても筋の通る例にする）
   const t = today;

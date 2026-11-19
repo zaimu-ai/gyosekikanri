@@ -11,7 +11,7 @@
 set -e
 cd "$(dirname "$0")"
 mkdir -p dist
-JS="src/20-core.js src/25-seed.js src/28-ui.js src/30-views.js src/32-import.js src/35-delivery.js src/38-invoice.js src/40-print.js src/50-main.js"
+JS="src/20-core.js src/25-seed.js src/28-ui.js src/30-views.js src/32-import.js src/35-delivery.js src/38-invoice.js src/40-print.js src/45-labels.js src/50-main.js"
 {
   if [ -n "$COMPANY_JSON" ]; then
     node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); delete c.title; process.stdout.write("window.__COMPANY_PRESET__="+JSON.stringify(c)+";\n")' "$COMPANY_JSON"

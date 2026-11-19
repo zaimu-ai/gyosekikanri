@@ -59,29 +59,30 @@ execFileSync('python3', ['-I', '-c', 'import sys;open(sys.argv[2],"wb").write(op
 
   // ---- 得意先の取込 ----
   await nav('#customers'); await p.click('a[href="#customers-import"]'); await p.waitForTimeout(250);
-  ok('取込の画面が開く', (await p.textContent('h1')) === '得意先を取り込む（CSV）');
+  ok('取込の画面が開く', (await p.textContent('h1')) === '得意先・宛名を取り込む（CSV）');
   await p.setInputFiles('#ciFile', csvSjis); await p.waitForTimeout(400);
   const sj = await p.evaluate(() => ui.ci && ui.ci.rows.map(x => [x.rec.code, x.status]));
   ok('Shift_JIS の CSV も読める', sj && sj.length === 12 && sj[0][0] === 201, JSON.stringify(sj && sj.slice(0, 2)));
   await p.setInputFiles('#ciFile', csvUtf8); await p.waitForTimeout(400);
-  const an = await p.evaluate(() => ui.ci.rows.map(x => ({ c: x.rec.code, s: x.status, e: x.errs.join('/'), w: x.warns.join('/'), bt: x.rec.billTo, tr: x.rec.taxRounding, cd: x.rec.closingDay, nc: x.rec.needsCheck })));
+  const an = await p.evaluate(() => ui.ci.rows.map(x => ({ c: x.rec.code, s: x.status, e: x.errs.join('/'), w: x.warns.join('/'), bt: x.rec.billTo, tr: x.rec.taxRounding, cd: x.rec.closingDay, nc: x.rec.needsCheck, t: x.rec.target })));
   const by = c => an.find(x => x.c === c && x.s !== 'error') || an.find(x => x.c === c);
   ok('取り込む 7件・登録済み 1件・取り込めない 4件', an.filter(x => x.s === 'new').length === 7 && an.filter(x => x.s === 'exists').length === 1 && an.filter(x => x.s === 'error').length === 4, JSON.stringify(an.map(x => [x.c, x.s])));
   ok('取り込めない行には理由が出る（コード・重複・名前・締日）', an.filter(x => x.s === 'error').every(x => x.e) && $text(an, 'コード「abc」') && $text(an, '同じコードが') && $text(an, '得意先名が空欄') && $text(an, '締日「45」'));
-  ok('締日0は「締日なし」', by(204).cd === null && by(204).w.includes('締日なし'));
+  ok('締日0は得意先ではなく宛名（仕入先など）に入れる', by(204).t === 'addr' && by(204).s === 'new' && by(204).w.includes('宛名'));
+  ok('ほかの行は得意先に入れる', an.filter(x => x.s === 'new' && x.t === 'cust').length === 6);
   ok('丸目0は切り捨て、1は四捨五入、2は会社の設定（理由を出す）', by(203).tr === 'floor' && by(201).tr === 'round' && by(205).tr === null && by(205).w.includes('丸目 2'));
   ok('請コードで請求先を決める（202→201）', by(202).bt === 201);
   ok('請求先が見つからないときは未設定（理由を出す）', by(206).bt === null && by(206).w.includes('999'));
-  ok('請求先に締日がないときは未設定（理由を出す）', by(207).bt === null && by(207).w.includes('締日がない'));
+  ok('請求先が宛名（締日0）のときは未設定（理由を出す）', by(207).bt === null && by(207).w.includes('204'));
   ok('空欄にした項目を読む', JSON.stringify(by(202).nc) === JSON.stringify(['住所1', '電話番号']));
   ok('確認の表に全部の行が出る', (await p.$$('#view tbody tr')).length === 12);
   const before = await p.evaluate(() => S.customers.length);
   await p.click('[data-act=importCustomersRun]'); await p.waitForTimeout(250); await p.click('#dlg .btn.primary'); await p.waitForTimeout(800);
-  const after = await p.evaluate(() => { const g = c => S.customers.find(x => x.code === c); return { n: S.customers.length, bt: g(202).billToId === g(201).id, old: g(101).name, nc: g(202).needsCheck, legacy: !!g(203).legacy, tr: g(203).taxRounding }; });
-  ok('7件を取り込む（登録済みの 101 は上書きしない）', after.n === before + 7 && after.old === '見本金属(株)', JSON.stringify(after));
+  const after = await p.evaluate(() => { const g = c => S.customers.find(x => x.code === c); return { addr: S.addressees.some(a => a.code === 204) && !S.customers.some(c => c.code === 204), n: S.customers.length, bt: g(202).billToId === g(201).id, old: g(101).name, nc: g(202).needsCheck, legacy: !!g(203).legacy, tr: g(203).taxRounding }; });
+  ok('得意先6件・宛名1件を取り込む（登録済みの 101 は上書きしない）', after.n === before + 6 && after.addr && after.old === '見本金属(株)', JSON.stringify(after));
   ok('取り込んだ得意先の請求先・端数・空欄の項目・元の値', after.bt && after.tr === 'floor' && after.nc.length === 2 && after.legacy);
   const snaps = await p.evaluate(async () => (await listSnapshots()).map(s => s.reason));
-  ok('取り込む前に端末内バックアップを取る', snaps.some(r => r.startsWith('得意先の取込の前')), JSON.stringify(snaps.slice(-2)));
+  ok('取り込む前に端末内バックアップを取る', snaps.some(r => r.startsWith('得意先・宛名の取込の前')), JSON.stringify(snaps.slice(-2)));
   ok('得意先の一覧に「空欄の項目がある得意先」の知らせが出る', (await p.textContent('#view')).includes('空欄にした項目がある得意先が 1 件'));
   await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(300);
   ok('再読み込みしても取り込んだ得意先が残る', await p.evaluate(() => S.customers.some(c => c.code === 207)));
@@ -130,15 +131,15 @@ execFileSync('python3', ['-I', '-c', 'import sys;open(sys.argv[2],"wb").write(op
     const old = { version: 1, kind: 'main', customers: [{ id: 'a', code: 1, name: '旧', closingDay: 20, destinations: [{ id: 'x', name: '送' }], opening: { date: '', balance: 0 }, active: true }], orders: [{ id: 'o', no: '1', customerId: 'a' }], deliveries: [], invoices: [], payments: [] };
     const d = migrate(JSON.parse(JSON.stringify(old)));
     const c = d.customers[0];
-    return { v: d.version, cd: c.closingDay, tr: c.taxRounding, bt: c.billToId, nc: c.needsCheck, dc: c.destinations[0].code, keep: c.name === '旧' && d.orders.length === 1 && d.orders[0].priceBasis === 'kg' };
+    return { v: d.version, addr: Array.isArray(d.addressees) && d.addressees.length === 0 && d.labelSettings.sheet === 'a12', cd: c.closingDay, tr: c.taxRounding, bt: c.billToId, nc: c.needsCheck, dc: c.destinations[0].code, keep: c.name === '旧' && d.orders.length === 1 && d.orders[0].priceBasis === 'kg' };
   });
-  ok('第1版のデータを読める（締日などはそのまま、足した項目は未設定）', mg.v === 2 && mg.cd === 20 && mg.tr === null && mg.bt === null && Array.isArray(mg.nc) && mg.dc === '' && mg.keep, JSON.stringify(mg));
+  ok('第1版のデータを読める（締日などはそのまま、足した項目は未設定）', mg.v === 3 && mg.addr && mg.cd === 20 && mg.tr === null && mg.bt === null && Array.isArray(mg.nc) && mg.dc === '' && mg.keep, JSON.stringify(mg));
 
   // ---- スマホ幅 ----
   const mctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); const mp = await mctx.newPage();
   mp.on('pageerror', e => errors.push('mobile: ' + e.message));
   await mp.goto(URL + '#home'); await mp.waitForSelector('h1'); await mp.waitForTimeout(300);
-  for (const h of ['#order-new', '#orders', '#customers', '#customers-import', '#customer-new', '#delivery-new', '#invoices']) {
+  for (const h of ['#order-new', '#orders', '#customers', '#customers-import', '#customer-new', '#delivery-new', '#invoices', '#labels', '#addressee-new']) {
     await mp.evaluate(x => { location.hash = x; }, h); await mp.waitForTimeout(250);
     const w = await mp.evaluate(() => document.documentElement.scrollWidth);
     ok(`スマホ幅：${h} が横にはみ出さない`, w <= 390, `（${w}px）`);

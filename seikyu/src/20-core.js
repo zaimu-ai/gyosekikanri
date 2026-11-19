@@ -4,8 +4,8 @@
    データは利用者のブラウザの中（IndexedDB。使えないときは localStorage）に保存する。
    登録したデータは消さない（取り消しは「取消」の状態で残す）。
    ========================================================= */
-const APP_VERSION = '0.2.0';
-const DATA_VERSION = 2;
+const APP_VERSION = '0.3.0';
+const DATA_VERSION = 3;
 
 /* ---------- 小さな道具 ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -109,6 +109,14 @@ const RULES_DEFAULT = {
   weightDigits: 1,        // 明細の重量の桁（事務コンの画面 423.8 で確認）
   honorific: { delivery: '様', kari: '殿', invoice: '殿' },
 };
+/* 宛名ラベルの用紙（A4）。寸法は mm。お使いの用紙に合わせて「自分で決める」で変えられる */
+const LABEL_SHEETS = {
+  a12: { label: '12面（2列×6段・86.4×42.3mm）', cols: 2, rows: 6, w: 86.4, h: 42.3, top: 21.6, left: 18.6, gapX: 0, gapY: 0 },
+  a10: { label: '10面（2列×5段・86.4×50.8mm）', cols: 2, rows: 5, w: 86.4, h: 50.8, top: 21.5, left: 18.6, gapX: 0, gapY: 0 },
+  a18: { label: '18面（3列×6段・70×42.3mm）', cols: 3, rows: 6, w: 70, h: 42.3, top: 21.6, left: 0, gapX: 0, gapY: 0 },
+  a24: { label: '24面（3列×8段・70×33.9mm）', cols: 3, rows: 8, w: 70, h: 33.9, top: 12.9, left: 0, gapX: 0, gapY: 0 },
+};
+const LABEL_DEFAULT = { sheet: 'a12', custom: { ...LABEL_SHEETS.a12 }, honorific: '御中', offsetX: 0, offsetY: 0, copies: 1, start: 1 };
 const MATERIALS_DEFAULT = ['5056S-H34', '5056S-H32', '5056S-O', '52S-H34', '52S-H32', '52S-H', '52S-O'];
 
 function newDataset(kind) {
@@ -120,6 +128,8 @@ function newDataset(kind) {
     numbersConfirmed: false,
     materials: [...MATERIALS_DEFAULT],
     customers: [], orders: [], deliveries: [], invoices: [], payments: [], log: [],
+    addressees: [],   // 宛名（仕入先など。請求はしない。封筒のラベルを印刷するためだけ）
+    labelSettings: JSON.parse(JSON.stringify(LABEL_DEFAULT)),
   };
 }
 /** 古い形・欠けた項目を補う（登録済みのデータは消さない） */
@@ -129,7 +139,11 @@ function migrate(d) {
   d.rules = Object.assign(JSON.parse(JSON.stringify(RULES_DEFAULT)), d.rules || {});
   d.rules.honorific = Object.assign({ ...RULES_DEFAULT.honorific }, (d.rules && d.rules.honorific) || {});
   d.numbers = Object.assign({ ...base.numbers }, d.numbers || {});
-  for (const k of ['customers', 'orders', 'deliveries', 'invoices', 'payments', 'log']) if (!Array.isArray(d[k])) d[k] = [];
+  for (const k of ['customers', 'orders', 'deliveries', 'invoices', 'payments', 'log', 'addressees']) if (!Array.isArray(d[k])) d[k] = [];
+  // 第3版で足した項目：宛名（仕入先など）とラベルの設定
+  d.labelSettings = Object.assign(JSON.parse(JSON.stringify(LABEL_DEFAULT)), d.labelSettings || {});
+  d.labelSettings.custom = Object.assign({ ...LABEL_SHEETS.a12 }, d.labelSettings.custom || {});
+  for (const a of d.addressees) { if (a.active == null) a.active = true; if (!Array.isArray(a.needsCheck)) a.needsCheck = []; if (a.honorific == null) a.honorific = ''; if (a.address2 == null) a.address2 = ''; }
   if (!Array.isArray(d.materials)) d.materials = [...MATERIALS_DEFAULT];
   for (const c of d.customers) {
     if (!Array.isArray(c.destinations)) c.destinations = []; if (c.active == null) c.active = true; if (!c.opening) c.opening = { date: '', balance: 0 };

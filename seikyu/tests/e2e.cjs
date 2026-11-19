@@ -175,7 +175,7 @@ const ROUTES = ['#home', '#orders', '#order-new', '#deliveries', '#delivery-new'
   ok('テストデータに戻ると、登録した内容が残っている', await page.evaluate(no => MODE === 'test' && S.deliveries.some(d => String(d.no).padStart(6, '0') === no), newNo));
 
   // ---- デザインの決まり ----
-  for (const r of ['#home', '#delivery-new', '#invoices', '#setup']) {
+  for (const r of ['#home', '#delivery-new', '#invoices', '#setup', '#order-new', '#customers', '#customers-import', '#labels', '#addressee-new']) {
     await page.evaluate(h => { location.hash = h; }, r); await page.waitForTimeout(200);
     const small = await page.evaluate(() => [...document.querySelectorAll('main .btn, main .icon-btn, nav a, main input:not([type=checkbox]):not([type=hidden]):not([type=file]), main select')].filter(e => e.offsetParent && e.getBoundingClientRect().height < 44).map(e => e.outerHTML.slice(0, 60)));
     ok(`${r} 押せる部分は高さ44px以上`, small.length === 0, small.slice(0, 3).join(' | '));

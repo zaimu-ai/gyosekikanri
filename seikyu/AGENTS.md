@@ -7,6 +7,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
 ## プロジェクトの概要
 
 - アルミ引抜管メーカー向けの請求システムです。流れは「製作伝票入力 → 納品書（仮納品書）→ 合計請求書 → 入金 → 得意先台帳」。
+- 「宛名ラベル」のタブで、仕入先など（宛名。得意先とは別に登録し、請求はしない）と得意先の、封筒のラベルシールを A4 に印刷します。
 - 旧システム（事務コン）から移る担当の方が迷わないよう、入力の順番と項目は事務コンに合わせています。
   - これを変えるときは利用者に確認します。
 
@@ -21,7 +22,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
   - IndexedDB：database `seikyu-system`、store `kv`
   - key：`data:main`・`data:test`・`backups:<mode>`・`mode`・`lastDaily:<mode>`
   - IndexedDB が使えないときは、localStorage の `seikyu-system:` で始まる key に保存します。
-- 保存の形は `DATA_VERSION`（今は 2）で管理します。形を変えるときは `migrate` に古い形を読む処理を足し、古い key は消しません。
+- 保存の形は `DATA_VERSION`（今は 3）で管理します。形を変えるときは `migrate` に古い形を読む処理を足し、古い key は消しません。
 - 会社の実際の情報（会社名・登録番号・振込先）はコードに入れません。
   - 本番用に作るときだけ、`COMPANY_JSON` で repository の外の JSON を渡します。
   - 渡さないとき、テストデータでは架空の会社（`COMPANY_FICTIONAL`）を表示します。
@@ -34,7 +35,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
   - `src/00-head.html` の CSS
   - 各画面の HTML の組み立て（class・要素の並び）
 - **変えないもの**
-  - 計算と保存（`src/20-core.js`）、帳票の大きさ（`src/40-print.js`）
+  - 計算と保存（`src/20-core.js`）、帳票の大きさ（`src/40-print.js`）、宛名ラベルの位置と大きさ（`src/45-labels.js` の mm の計算）
   - 要素の `id`、`data-act`・`data-l`・`data-s`・`data-f`・`data-di`・`data-df` 属性
 - 業務の言葉の意味は変えません（「取消」「締日なし」「請求先」「摘要」など）。
 
@@ -48,6 +49,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
    - `node tests/e2e.cjs`
    - `node tests/e2e2.cjs`
    - `node tests/e2e3.cjs`
+   - `node tests/e2e4.cjs`
    - `node tests/pages.cjs`
    - `node tests/file-mode.cjs`
 4. テストには Playwright（Chromium）が必要です。使えない環境では、そのことを報告に書いてください。確かめていないことを「確認済み」と書かないでください。
