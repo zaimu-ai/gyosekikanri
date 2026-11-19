@@ -4,7 +4,7 @@
    データは利用者のブラウザの中（IndexedDB。使えないときは localStorage）に保存する。
    登録したデータは消さない（取り消しは「取消」の状態で残す）。
    ========================================================= */
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 const DATA_VERSION = 3;
 
 /* ---------- 小さな道具 ---------- */
@@ -111,12 +111,18 @@ const RULES_DEFAULT = {
 };
 /* 宛名ラベルの用紙（A4）。寸法は mm。お使いの用紙に合わせて「自分で決める」で変えられる */
 const LABEL_SHEETS = {
+  // アスクルで買っている用紙：プラス「いつものラベル」ME-504T（21面・余白なし・3列×7段・70×42.3mm）。上下の 0.45mm は 297−42.3×7 の半分
+  me504t: { label: 'ME-504T（プラス いつものラベル）21面 余白なし（3列×7段・70×42.3mm）', cols: 3, rows: 7, w: 70, h: 42.3, top: 0.45, left: 0, gapX: 0, gapY: 0 },
   a12: { label: '12面（2列×6段・86.4×42.3mm）', cols: 2, rows: 6, w: 86.4, h: 42.3, top: 21.6, left: 18.6, gapX: 0, gapY: 0 },
   a10: { label: '10面（2列×5段・86.4×50.8mm）', cols: 2, rows: 5, w: 86.4, h: 50.8, top: 21.5, left: 18.6, gapX: 0, gapY: 0 },
   a18: { label: '18面（3列×6段・70×42.3mm）', cols: 3, rows: 6, w: 70, h: 42.3, top: 21.6, left: 0, gapX: 0, gapY: 0 },
   a24: { label: '24面（3列×8段・70×33.9mm）', cols: 3, rows: 8, w: 70, h: 33.9, top: 12.9, left: 0, gapX: 0, gapY: 0 },
 };
-const LABEL_DEFAULT = { sheet: 'a12', custom: { ...LABEL_SHEETS.a12 }, honorific: '御中', offsetX: 0, offsetY: 0, copies: 1, start: 1 };
+const LABEL_DEFAULT = { sheet: 'me504t', chosen: false, custom: { ...LABEL_SHEETS.me504t }, honorific: '御中', offsetX: 0, offsetY: 0, copies: 1, start: 1 };
+/* 旧システムの得意先・宛名の一覧（CSV）。repository には入れない。本番用に作るときだけ build.sh が MASTER_CSV から入れる */
+const MASTER_CSV = (typeof window !== 'undefined' && window.__MASTER_CSV__) || null;
+/** まだ何も登録していないデータか（得意先・宛名・伝票・入金がどれもない） */
+const datasetIsEmpty = d => ['customers', 'addressees', 'orders', 'deliveries', 'invoices', 'payments'].every(k => !(d[k] || []).length);
 const MATERIALS_DEFAULT = ['5056S-H34', '5056S-H32', '5056S-O', '52S-H34', '52S-H32', '52S-H', '52S-O'];
 
 function newDataset(kind) {
@@ -142,7 +148,10 @@ function migrate(d) {
   for (const k of ['customers', 'orders', 'deliveries', 'invoices', 'payments', 'log', 'addressees']) if (!Array.isArray(d[k])) d[k] = [];
   // 第3版で足した項目：宛名（仕入先など）とラベルの設定
   d.labelSettings = Object.assign(JSON.parse(JSON.stringify(LABEL_DEFAULT)), d.labelSettings || {});
-  d.labelSettings.custom = Object.assign({ ...LABEL_SHEETS.a12 }, d.labelSettings.custom || {});
+  d.labelSettings.custom = Object.assign({ ...LABEL_SHEETS.me504t }, d.labelSettings.custom || {});
+  // 利用者がまだ用紙を選んでいなければ、使っている用紙（ME-504T）にする
+  if (!d.labelSettings.chosen) d.labelSettings.sheet = LABEL_DEFAULT.sheet;
+  if (d.labelSettings.sheet !== 'custom' && !LABEL_SHEETS[d.labelSettings.sheet]) d.labelSettings.sheet = LABEL_DEFAULT.sheet;
   for (const a of d.addressees) { if (a.active == null) a.active = true; if (!Array.isArray(a.needsCheck)) a.needsCheck = []; if (a.honorific == null) a.honorific = ''; if (a.address2 == null) a.address2 = ''; }
   if (!Array.isArray(d.materials)) d.materials = [...MATERIALS_DEFAULT];
   for (const c of d.customers) {

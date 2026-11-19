@@ -133,7 +133,15 @@ async function importCustomersRun() {
   // 取り込むあいだに、ほかで同じコードが登録されていないか確かめ直す
   const dup = adds.filter(x => (x.rec.target === 'addr' ? S.addressees : S.customers).some(c => Number(c.code) === x.rec.code));
   if (dup.length) { toast(`コード ${dup.map(x => x.rec.code).join('、')} がもう登録されています。ファイルを選び直してください`, 'circle-alert'); return; }
-    await snapshot(`得意先・宛名の取込の前（${R.fileName}）`);
+  await snapshot(`得意先・宛名の取込の前（${R.fileName}）`);
+  const { made, nAddr } = applyCustomerImport(R, adds);
+  logAction('得意先・宛名を取込', `得意先 ${made.length} 件・宛名 ${nAddr} 件（${R.fileName}）`);
+  await save(true);
+  ui.ci = null; ui.cl = { q: '', show: '' };
+  toast(`得意先を ${made.length} 件、宛名（仕入先など）を ${nAddr} 件取り込みました`); go(made.length ? '#customers' : '#labels');
+}
+/** 取込の確認で「取り込む」になった行を登録する（保存はしない。呼ぶ側が snapshot を取ってから使う） */
+function applyCustomerImport(R, adds) {
   const at = nowIso(); const made = [];
   let nAddr = 0;
   for (const x of adds) {
@@ -146,8 +154,22 @@ async function importCustomersRun() {
     S.customers.push(c); made.push([c, r.billTo]);
   }
   for (const [c, b] of made) if (b != null) { const t = S.customers.find(x => Number(x.code) === b); if (t) c.billToId = t.id; }
-  logAction('得意先・宛名を取込', `得意先 ${made.length} 件・宛名 ${nAddr} 件（${R.fileName}）`);
+  return { made, nAddr };
+}
+/** 本番のデータがまだ空のとき、旧システムの得意先・宛名の一覧（本番用に作ったときだけ入っている）を登録する */
+async function registerMasterIfEmpty() {
+  if (!MASTER_CSV || MODE !== 'main' || saveBlocked || !datasetIsEmpty(S)) return null;
+  const R = analyzeCustomerCsv(MASTER_CSV.text, MASTER_CSV.name);
+  const adds = R.rows.filter(x => x.status === 'new');
+  if (R.headerError || !adds.length) return null;
+  await snapshot('旧システムの得意先・宛名を登録する前');
+  const { made, nAddr } = applyCustomerImport(R, adds);
+  const errs = R.rows.filter(x => x.status === 'error').length;
+  logAction('旧システムの得意先・宛名を登録', `得意先 ${made.length} 件・宛名 ${nAddr} 件（${MASTER_CSV.name}）${errs ? `、取り込めない行 ${errs} 件` : ''}`);
   await save(true);
-  ui.ci = null; ui.cl = { q: '', show: '' };
-  toast(`得意先を ${made.length} 件、宛名（仕入先など）を ${nAddr} 件取り込みました`); go(made.length ? '#customers' : '#labels');
+  return { nCust: made.length, nAddr, errs };
+}
+function openMasterImport() {
+  if (!MASTER_CSV) return;
+  ui.ci = analyzeCustomerCsv(MASTER_CSV.text, MASTER_CSV.name); go('#customers-import');
 }

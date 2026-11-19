@@ -131,7 +131,7 @@ execFileSync('python3', ['-I', '-c', 'import sys;open(sys.argv[2],"wb").write(op
     const old = { version: 1, kind: 'main', customers: [{ id: 'a', code: 1, name: '旧', closingDay: 20, destinations: [{ id: 'x', name: '送' }], opening: { date: '', balance: 0 }, active: true }], orders: [{ id: 'o', no: '1', customerId: 'a' }], deliveries: [], invoices: [], payments: [] };
     const d = migrate(JSON.parse(JSON.stringify(old)));
     const c = d.customers[0];
-    return { v: d.version, addr: Array.isArray(d.addressees) && d.addressees.length === 0 && d.labelSettings.sheet === 'a12', cd: c.closingDay, tr: c.taxRounding, bt: c.billToId, nc: c.needsCheck, dc: c.destinations[0].code, keep: c.name === '旧' && d.orders.length === 1 && d.orders[0].priceBasis === 'kg' };
+    return { v: d.version, addr: Array.isArray(d.addressees) && d.addressees.length === 0 && d.labelSettings.sheet === 'me504t', cd: c.closingDay, tr: c.taxRounding, bt: c.billToId, nc: c.needsCheck, dc: c.destinations[0].code, keep: c.name === '旧' && d.orders.length === 1 && d.orders[0].priceBasis === 'kg' };
   });
   ok('第1版のデータを読める（締日などはそのまま、足した項目は未設定）', mg.v === 3 && mg.addr && mg.cd === 20 && mg.tr === null && mg.bt === null && Array.isArray(mg.nc) && mg.dc === '' && mg.keep, JSON.stringify(mg));
 

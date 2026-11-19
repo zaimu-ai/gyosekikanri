@@ -31,10 +31,14 @@ const ok = (name, cond, extra = '') => { cond ? pass++ : fail++; console.log(`${
     const lbs = [...host.querySelectorAll('.lb')];
     return { pages: host.querySelectorAll('.page').length, n: lbs.length, s0: [lbs[0].style.left, lbs[0].style.top, lbs[0].style.width], s1: [lbs[1].style.left, lbs[1].style.top], text: lbs[0].textContent.replace(/\s+/g, ' ').trim() };
   });
-  ok('12面：1ページに2枚、左上から右へ', lay.pages === 1 && lay.n === 2 && lay.s0.join() === '18.6mm,21.6mm,86.4mm' && lay.s1.join() === '105mm,21.6mm', JSON.stringify(lay));
+  ok('はじめの用紙は ME-504T（21面・余白なし）', await p.evaluate(() => S.labelSettings.sheet === 'me504t' && labelSheet().cols === 3 && labelSheet().rows === 7));
+  ok('ME-504T：1ページに2枚、左上（0mm・0.45mm）から右へ 70mm ずつ', lay.pages === 1 && lay.n === 2 && lay.s0.join() === '0mm,0.45mm,70mm' && lay.s1.join() === '70mm,0.45mm', JSON.stringify(lay));
   ok('ラベルに〒・住所1・住所2・名前・御中', /〒000-0002 架空県見本市2-3-4 見本ビル3階 見本資材\(株\)御中/.test(lay.text), lay.text);
-  const st = await p.evaluate(() => { const h = document.createElement('div'); h.innerHTML = labelPages(ui.lb.sel, { copies: 3, start: 12 }); return { pages: h.querySelectorAll('.page').length, n: h.querySelectorAll('.lb').length, first: h.querySelector('.lb').style.top }; });
-  ok('使いかけの用紙（12枚目から）・3枚ずつ：6枚、用紙2枚', st.pages === 2 && st.n === 6 && st.first === `${(21.6 + 5 * 42.3).toFixed(1).replace(/\.0$/, '')}mm`, JSON.stringify(st));
+  const st = await p.evaluate(() => { const one = s => { const h = document.createElement('div'); h.innerHTML = labelPages(ui.lb.sel, { copies: 3, start: s }); return { pages: h.querySelectorAll('.page').length, n: h.querySelectorAll('.lb').length, top: h.querySelector('.lb').style.top, left: h.querySelector('.lb').style.left }; }; return [one(12), one(20)]; });
+  ok('使いかけの用紙（12枚目から）・3枚ずつ：6枚が4段目の右から入る', st[0].pages === 1 && st[0].n === 6 && st[0].top === '127.35mm' && st[0].left === '140mm', JSON.stringify(st[0]));
+  ok('20枚目からだと、入りきらない分は2枚目の用紙へ', st[1].pages === 2 && st[1].n === 6, JSON.stringify(st[1]));
+  const mg = await p.evaluate(() => { const d = migrate({ version: 3, kind: 'main', customers: [], deliveries: [], invoices: [], labelSettings: { sheet: 'a12', honorific: '様' } }); const e = migrate({ version: 3, kind: 'main', customers: [], deliveries: [], invoices: [], labelSettings: { sheet: 'a10', chosen: true } }); return [d.labelSettings.sheet, d.labelSettings.honorific, e.labelSettings.sheet]; });
+  ok('まだ用紙を選んでいないデータは ME-504T に、自分で選んだ用紙はそのまま', mg.join() === 'me504t,様,a10', mg.join());
   const fit = await p.evaluate(() => [fitPt('見本資材(株)', 76.4, 13, 7.5, 2.5), fitPt('とても長い名前の架空の会社株式会社第二工場資材部調達課', 76.4, 13, 7.5, 2.5)]);
   ok('長い名前は文字を小さくする', fit[0] === 13 && fit[1] < 13 && fit[1] >= 7.5, JSON.stringify(fit));
 
@@ -89,14 +93,14 @@ const ok = (name, cond, extra = '') => { cond ? pass++ : fail++; console.log(`${
   await host.setContent(`<iframe src="${URL}#labels" style="width:1340px;height:880px;border:0"></iframe>`); await host.waitForTimeout(1200);
   const f = host.frames()[1];
   await f.waitForSelector('h1'); await f.click('[data-act=lbAll][data-v="1"]'); await f.waitForTimeout(250);
-  await f.selectOption('#lsCopies', '7'); await f.waitForTimeout(250);
+  await f.selectOption('#lsCopies', '10'); await f.waitForTimeout(250);
   await f.click('[data-act=lbPrint]'); await f.waitForTimeout(300);
   ok('iframe では「印刷する」はなく「PDFで保存」', !(await f.$('#dlg .btn >> text=印刷する')) && await f.isVisible('#dlg .btn >> text=PDFで保存'));
   const dl = host.waitForEvent('download', { timeout: 90000 });
   await f.click('#dlg .btn >> text=PDFで保存');
   const d = await dl; const file = path.join(OUT, 'v030_labels.pdf'); await d.saveAs(file);
   const pages = +(/Pages:\s+(\d+)/.exec(execFileSync('pdfinfo', [file]).toString()) || [])[1];
-  ok('PDF ができる（2件×7枚＝14枚 → 用紙2枚）', fs.readFileSync(file).slice(0, 5).toString() === '%PDF-' && pages === 2, `（${pages}ページ）`);
+  ok('PDF ができる（ME-504T：2件×10枚＝20枚 → 用紙1枚）', fs.readFileSync(file).slice(0, 5).toString() === '%PDF-' && pages === 1, `（${pages}ページ）`);
   execFileSync('pdftoppm', ['-r', '50', '-png', '-f', '1', '-l', '1', file, path.join(OUT, 'v030_labels')]);
 
   ok('JavaScript のエラーがない', errors.length === 0, errors.slice(0, 3).join(' / '));

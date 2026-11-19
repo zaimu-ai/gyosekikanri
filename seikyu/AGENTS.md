@@ -26,6 +26,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
 - 会社の実際の情報（会社名・登録番号・振込先）はコードに入れません。
   - 本番用に作るときだけ、`COMPANY_JSON` で repository の外の JSON を渡します。
   - 渡さないとき、テストデータでは架空の会社（`COMPANY_FICTIONAL`）を表示します。
+- 旧システムの得意先・宛名の一覧（実データ）もコードに入れません。本番用に作るときだけ `MASTER_CSV` で渡します（`MASTER_CSV` を入れて作ったファイルは本番のデータで開き、本番のデータが空なら一覧を登録します）。テストでは架空の一覧（`tests/fixtures/master_test.csv`）を使います。
 
 ## 今の依頼：デザイン（見た目）の仕上げ
 
@@ -50,6 +51,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
    - `node tests/e2e2.cjs`
    - `node tests/e2e3.cjs`
    - `node tests/e2e4.cjs`
+   - `node tests/e2e5.cjs`（途中で一覧入りに作り直し、最後に一覧なしで作り直します）
    - `node tests/pages.cjs`
    - `node tests/file-mode.cjs`
 4. テストには Playwright（Chromium）が必要です。使えない環境では、そのことを報告に書いてください。確かめていないことを「確認済み」と書かないでください。

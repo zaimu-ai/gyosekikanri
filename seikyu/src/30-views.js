@@ -228,7 +228,7 @@ function viewCustomers() {
   const nCheck = S.customers.filter(c => c.needsCheck && c.needsCheck.length).length;
   return `
   <div class="page-head"><div><h1>得意先</h1><p class="lead">得意先ごとに締日・請求先・消費税の端数・送り先を決めます。取引をやめた得意先は「取引停止」にします（消しません）。</p></div>
-    <div class="actions"><a class="btn primary" href="#customer-new">${icon('plus')}得意先を登録する</a><a class="btn" href="#customers-import">${icon('file-up')}得意先・宛名を取り込む（CSV）</a></div></div>
+    <div class="actions"><a class="btn primary" href="#customer-new">${icon('plus')}得意先を登録する</a><a class="btn" href="#customers-import">${icon('file-up')}得意先・宛名を取り込む（CSV）</a>${MASTER_CSV && MODE === 'main' ? `<button type="button" class="btn" data-act="masterImport">${icon('list-plus')}旧システムの一覧から足りない分を登録する</button>` : ''}</div></div>
   ${nCheck ? notice('warn', `<b>取り込んだときに空欄にした項目がある得意先が ${nCheck} 件あります。</b>元の一覧で文字が重なっていて読めなかった項目です。手で入れてください。<div class="actions" style="margin-top:8px"><button type="button" class="btn sm" data-act="clShow" data-v="check">${icon('list-checks')}その得意先だけ表示する</button></div>`) : ''}
   <div class="card stack"><div class="form-grid">
     ${fld('clQ', '探す（コード・名前・住所・電話番号）', txt('clQ', f.q))}

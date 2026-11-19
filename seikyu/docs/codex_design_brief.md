@@ -66,6 +66,7 @@
    - `node tests/e2e2.cjs`
    - `node tests/e2e3.cjs`
    - `node tests/e2e4.cjs`
+   - `node tests/e2e5.cjs`
    - `node tests/pages.cjs`
    - `node tests/file-mode.cjs`
 4. 次の画面の画面写真を、1366px と 390px、明るい表示と暗い表示のそれぞれで撮って、出来上がりとして渡す。

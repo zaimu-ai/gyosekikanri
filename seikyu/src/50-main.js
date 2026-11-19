@@ -62,7 +62,7 @@ function render() {
 function renderChrome() {
   $('#brandCo').textContent = S.company.name || '';
   const band = $('#modeBand');
-  band.innerHTML = MODE === 'test' ? `<div class="mode-band"><strong>${icon('triangle-alert')}テストデータで表示しています</strong><span>取引先・金額は架空です${COMPANY_PRESET.name ? '（会社の情報だけは実際の値）' : ''}。本番のデータとは別に保存されます。</span><a href="#setup" class="small">本番のデータに切り替える</a></div>` : '';
+  band.innerHTML = MODE === 'test' ? `<div class="mode-band"><strong>${icon('triangle-alert')}テストデータで表示しています</strong><span>取引先・金額は架空です${COMPANY_PRESET.name ? '（会社の情報だけは実際の値）' : ''}。${MASTER_CSV ? '本番のデータに切り替えると、旧システムの得意先・宛名が登録されています。' : ''}本番のデータとは別に保存されます。</span><a href="#setup" class="small">本番のデータに切り替える</a></div>` : '';
   const openOrders = S.orders.filter(o => ['open', 'partial'].includes(orderState(o))).length;
   const bo = $('#badgeOrders'); bo.hidden = !openOrders; bo.textContent = openOrders; bo.setAttribute('aria-label', `出荷待ち ${openOrders}件`);
   const due = dueInvoiceRows().length;
@@ -116,6 +116,7 @@ const ACTIONS = {
   clShow: el => { ui.cl.show = el.dataset.v; render(); },
   lbAll: el => labelSelectAll(el.dataset.v === '1'),
   lbPrint: () => openPrintLabels(),
+  masterImport: () => openMasterImport(),
   importCustomersRun: () => importCustomersRun(),
   oInnerKind: el => { $('#oInnerKind').value = el.dataset.v; $$('[data-act=oInnerKind]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); $('label[for=oInner]').firstChild.textContent = `${el.dataset.v === 't' ? '肉厚' : '内径'}（mm）`; $('#oInner').value = ''; $('#oInner').focus(); orderFormCalcHint(); },
   addDest: () => { ui.cf.dests.push({ id: uid(), name: '', address: '', tel: '', active: true }); ui.dirty = true; $('#destRows').innerHTML = ui.cf.dests.map((x, i) => destRowHtml(x, i)).join(''); drawIcons(); focusLater(`#dn${ui.cf.dests.length - 1}`); },
@@ -154,6 +155,8 @@ async function switchMode(to) {
   else d = to === 'main' ? newDataset('main') : seedTestData();
   MODE = to; S = d; await kvSet('mode', MODE);
   if (!raw) await save(true);
+  const reg = await registerMasterIfEmpty();
+  if (reg) { ui.df = null; ui.cf = null; ui.dirty = false; toast(`本番のデータに切り替え、旧システムの得意先 ${reg.nCust} 件・宛名 ${reg.nAddr} 件を登録しました`); go('#customers'); return; }
   ui.df = null; ui.cf = null; ui.dirty = false;
   toast(to === 'main' ? '本番のデータに切り替えました' : 'テストデータに切り替えました');
   go('#home');
@@ -180,21 +183,26 @@ async function boot() {
   idbConn = await openIdb();
   storageKind = idbConn ? 'indexeddb' : (() => { try { localStorage.setItem(LS_PREFIX + 't', '1'); localStorage.removeItem(LS_PREFIX + 't'); return 'localstorage'; } catch (e) { return 'none'; } })();
   let mode = await kvGet('mode');
-  if (mode !== 'main' && mode !== 'test') mode = (await kvGet('data:main')) ? 'main' : 'test';
+  // はじめて開いたとき：本番のデータがあるか、旧システムの一覧を入れて作ったときは本番で開く
+  if (mode !== 'main' && mode !== 'test') mode = ((await kvGet('data:main')) || MASTER_CSV) ? 'main' : 'test';
   MODE = mode;
   const raw = await kvGet('data:' + MODE);
   if (raw) {
     let d = null; try { d = JSON.parse(raw); } catch (e) { d = null; }
     if (!validDataset(d)) { S = newDataset(MODE); renderChrome(); showLoadError(raw, MODE); return; }
     const before = d.version;
+    // 形を新しくする前の、元のままのデータを端末内バックアップに残す
+    if (before !== DATA_VERSION) { S = d; await snapshot('データの形を新しくする前'); }
     S = migrate(d);
-    if (before !== DATA_VERSION) { await snapshot('データの形を新しくする前'); logAction('データの形を新しくする', `${before ?? '不明'} → ${DATA_VERSION}`); await save(true); }
+    if (before !== DATA_VERSION) { logAction('データの形を新しくする', `${before ?? '不明'} → ${DATA_VERSION}`); await save(true); }
   } else {
     S = MODE === 'test' ? seedTestData() : newDataset('main');
     if (storageKind !== 'none') { await kvSet('mode', MODE); await save(true); }
   }
+  const reg = await registerMasterIfEmpty();
   currentHash = location.hash;
   render();
+  if (reg) toast(`旧システムの得意先 ${reg.nCust} 件・宛名（仕入先など）${reg.nAddr} 件を登録しました`);
   if (storageKind === 'none') toast('このブラウザではデータを保存できません（プライベートモードなど）。閉じると入力した内容は消えます', 'circle-alert');
 }
 boot();

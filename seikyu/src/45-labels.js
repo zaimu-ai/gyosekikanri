@@ -24,7 +24,7 @@ function labelFromKey(key) {
   const hon = k === 'a' && r.honorific != null && r.honorific !== '' ? (r.honorific === '-' ? '' : r.honorific) : S.labelSettings.honorific;
   return { name: r.name, hon, zip: r.zip || '', address: r.address || '', address2: r.address2 || '', ready: labelReady(r) };
 }
-function labelSheet() { const L = S.labelSettings; return L.sheet === 'custom' ? L.custom : (LABEL_SHEETS[L.sheet] || LABEL_SHEETS.a12); }
+function labelSheet() { const L = S.labelSettings; return L.sheet === 'custom' ? L.custom : (LABEL_SHEETS[L.sheet] || LABEL_SHEETS.me504t); }
 /** 文字の幅（全角を1、半角を0.55として数える） */
 const textUnits = s => [...String(s || '')].reduce((a, ch) => a + (/[ -~｡-ﾟ]/.test(ch) ? 0.55 : 1), 0);
 /** 幅に収まる文字の大きさ（pt）。max〜min の間で、0.5pt きざみ */
@@ -38,7 +38,7 @@ function labelHtml(l, sh) {
   return `<div class="lb-zip">${l.zip ? `〒${esc(l.zip)}` : ''}</div>
     <div class="lb-addr" style="font-size:${fitPt(l.address, inner, 10, 6.5)}pt">${esc(l.address)}</div>
     ${l.address2 ? `<div class="lb-addr" style="font-size:${fitPt(l.address2, inner, 10, 6.5)}pt">${esc(l.address2)}</div>` : ''}
-    <div class="lb-name" style="font-size:${fitPt(l.name, inner, 13, 7.5, l.hon ? 2.5 : 0)}pt">${name}</div>`;
+    <div class="lb-name" style="font-size:${fitPt(l.name, inner / 1.1, 13, 7.5, l.hon ? 2.5 : 0)}pt">${name}</div>`;
 }
 /** ラベルを A4 のページに並べる。start は1枚目の用紙で何枚目のラベルから使うか（使いかけの用紙のため） */
 function labelPages(keys, { copies = 1, start = 1 } = {}) {
@@ -53,7 +53,8 @@ function labelPages(keys, { copies = 1, start = 1 } = {}) {
     const cells = slots.slice(p, p + per).map((l, i) => {
       if (!l) return '';
       const c = i % sh.cols, r = Math.floor(i / sh.cols);
-      const x = sh.left + (Number(L.offsetX) || 0) + c * (sh.w + sh.gapX), y = sh.top + (Number(L.offsetY) || 0) + r * (sh.h + sh.gapY);
+      const mm = v => +v.toFixed(3);   // 小数の誤差（127.34999…）を出さない
+      const x = mm(sh.left + (Number(L.offsetX) || 0) + c * (sh.w + sh.gapX)), y = mm(sh.top + (Number(L.offsetY) || 0) + r * (sh.h + sh.gapY));
       return `<div class="lb" style="left:${x}mm;top:${y}mm;width:${sh.w}mm;height:${sh.h}mm">${labelHtml(l, sh)}</div>`;
     }).join('');
     pages.push(`<div class="page label-page">${cells}</div>`);
@@ -88,7 +89,7 @@ function viewLabels() {
       : `<div class="empty">${icon('mail')}<p>${f.q ? '条件に合う宛名はありません。' : f.kind === 'addr' ? '仕入先などの宛名はまだありません。' : '宛名はありません。'}</p>${f.kind === 'addr' && !f.q ? `<div class="actions"><a class="btn" href="#addressee-new">${icon('plus')}宛名を登録する</a><a class="btn" href="#customers-import">${icon('file-up')}宛名を取り込む（CSV）</a></div>` : ''}</div>`}
   </div>
   <div class="card stack"><h2>2. ラベルの用紙</h2>
-    <p class="small muted">お使いのラベル用紙（A4）の面の数と寸法に合わせてください。合う用紙がないときは「自分で決める」で、用紙の箱に書かれた寸法を入れます。はじめは普通の紙に印刷して、ラベル用紙と重ねて位置を確かめてください。</p>
+    <p class="small muted">はじめは、お使いの ME-504T（21面・余白なし）になっています。余白なしの用紙は、プリンターによっては端が印刷されないことがあります。ほかの用紙のときは、面の数と寸法に合わせてください。合う用紙がないときは「自分で決める」で、用紙の箱に書かれた寸法を入れます。はじめは普通の紙に印刷して、ラベル用紙と重ねて位置を確かめてください。</p>
     <div class="form-grid">
       ${fld('lsSheet', '用紙', sel('lsSheet', [...Object.entries(LABEL_SHEETS).map(([k, v]) => [k, v.label]), ['custom', '自分で決める']], L.sheet))}
       ${fld('lsStart', '1枚目は何枚目のラベルから使うか', sel('lsStart', Array.from({ length: per }, (_, i) => [i + 1, `${i + 1} 枚目から${i ? '' : '（新しい用紙）'}`]), Math.min(L.start, per)), { hint: '使いかけの用紙に印刷するとき。左上から右へ数えます' })}
@@ -115,7 +116,7 @@ function bindLabels() {
   $$('.lbPick').forEach(x => x.addEventListener('change', () => { const s = new Set(ui.lb.sel); x.checked ? s.add(x.value) : s.delete(x.value); ui.lb.sel = [...s]; render(); }));
   const L = S.labelSettings;
   const setv = (id, fn) => { const el = $('#' + id); if (el) el.onchange = () => { fn(el.value); save(); render(); }; };
-  setv('lsSheet', v => { if (v === 'custom' && L.sheet !== 'custom') L.custom = { ...labelSheet() }; L.sheet = v; L.start = 1; });
+  setv('lsSheet', v => { if (v === 'custom' && L.sheet !== 'custom') L.custom = { ...labelSheet() }; L.sheet = v; L.chosen = true; L.start = 1; });
   setv('lsStart', v => { L.start = Number(v) || 1; });
   setv('lsCopies', v => { L.copies = Number(v) || 1; });
   setv('lsHon', v => { L.honorific = v; });

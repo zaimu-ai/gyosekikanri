@@ -8,11 +8,17 @@
 #   COMPANY_JSON=/path/to/company.json bash build.sh
 #   （中身の例：{"name":"…","zip":"…","address":"…","tel":"…","fax":"…","regNo":"T…","bank":"…","title":"…"}）
 # 渡さないときは、会社の情報は空（テストデータでは架空の会社）になる。
+# 旧システムの得意先・宛名の一覧（CSV・UTF-8）も repository に入れない。本番用に作るときだけ MASTER_CSV で渡す：
+#   COMPANY_JSON=… MASTER_CSV=/path/to/得意先・宛名一覧.csv bash build.sh
+#   こうして作ったファイルは本番のデータで開き、本番のデータが空なら一覧の得意先・宛名を登録する（登録の前に端末内バックアップ）。
 set -e
 cd "$(dirname "$0")"
 mkdir -p dist
 JS="src/20-core.js src/25-seed.js src/28-ui.js src/30-views.js src/32-import.js src/35-delivery.js src/38-invoice.js src/40-print.js src/45-labels.js src/50-main.js"
 {
+  if [ -n "$MASTER_CSV" ]; then
+    node -e 'const fs=require("fs"),p=require("path"); const t=fs.readFileSync(process.argv[1],"utf8").replace(/^\uFEFF/,""); process.stdout.write(("window.__MASTER_CSV__="+JSON.stringify({name:p.basename(process.argv[1]),text:t})+";\n").replace(/<\//g,"<\\/"))' "$MASTER_CSV"
+  fi
   if [ -n "$COMPANY_JSON" ]; then
     node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); delete c.title; process.stdout.write("window.__COMPANY_PRESET__="+JSON.stringify(c)+";\n")' "$COMPANY_JSON"
   fi
@@ -36,4 +42,4 @@ fi
   cat dist/seikyu.html
   echo '</body></html>'
 } > "dist/請求システム.html"
-echo "built: $(wc -c < dist/seikyu.html) bytes${COMPANY_JSON:+（会社の情報を入れて作成）}"
+echo "built: $(wc -c < dist/seikyu.html) bytes${COMPANY_JSON:+（会社の情報を入れて作成）}${MASTER_CSV:+（得意先・宛名の一覧を入れて作成）}"
