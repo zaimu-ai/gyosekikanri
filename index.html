@@ -244,6 +244,17 @@ dialog .dlg-hd,dialog .dlg-ft{flex:none}
   .card{break-inside:avoid;box-shadow:none}
   .tbl-wrap{overflow:visible;max-height:none}
 }
+/* claude.ai のページの中では印刷の画面を開けないため「PDFで保存」にする。PDFに写すときは印刷と同じ見た目（明るい色・表を全部広げる・操作ボタンを出さない） */
+.pdf-shot{position:absolute;left:-40000px;top:0;width:1280px;padding:24px;background:#ffffff;color:#1a1a1a;color-scheme:light;
+  --bg:#ffffff; --surface:#ffffff; --surface-2:#f0f0ed; --surface-3:#e6e6e2; --border:#d4d4cf; --border-strong:#8a8a84;
+  --text:#1a1a1a; --text-2:#45453f; --text-3:#5f5f59; --primary:#0017c1; --primary-hover:#00118f; --on-primary:#ffffff; --primary-weak:#e8ecff;
+  --good:#1a7a2e; --bad:#c3201f; --warn-bg:#fff3d1; --warn-text:#5c4100; --warn-border:#d9a300; --bad-bg:#fdecec; --info-bg:#e8f0fe; --info-text:#123a7a;
+  --s-actual:#2a78d6; --s-prior:#eb6834; --s-budget:#a3a199; --s-line:#1baf7a; --grid:#e4e4df; --axis:#5f5f59; --shadow:none; --auto-bg:#eef4fd}
+.pdf-shot .no-print,.pdf-shot details:not([open]){display:none!important}
+.pdf-shot .tbl-wrap{overflow:visible;max-height:none}
+.pdf-shot .tbl th,.pdf-shot .tbl td{position:static!important}
+.pdf-shot .card{box-shadow:none}
+.pdf-head{display:flex;justify-content:space-between;gap:16px;align-items:baseline;border-bottom:2px solid #1a1a1a;padding-bottom:8px;margin-bottom:16px}
 </style>
 </head>
 <body>
@@ -833,12 +844,12 @@ async function download(name, text, type) {
     let ns = null;
     try { ns = await window.claude.use('downloads'); } catch (e) { ns = null; }
     if (ns) {
-      try { await ns.save({ filename: name, data: new Blob([text], { type }) }); toast('ファイルを保存しました'); }
+      try { await ns.save({ filename: name, data: text instanceof Blob ? text : new Blob([text], { type }) }); toast('ファイルを保存しました'); }
       catch (e) { if (e && e.code !== 'declined') toast(`ファイルを保存できませんでした（${e.code || '不明なエラー'}）`); }
       return;
     }
   }
-  const blob = new Blob([text], { type });
+  const blob = text instanceof Blob ? text : new Blob([text], { type });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
@@ -847,6 +858,73 @@ async function download(name, text, type) {
 const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`; };
 function exportJson() { return download(`業績管理_${companyName(S)}_バックアップ_${stamp()}.json`, JSON.stringify(S), 'application/json'); }
 function drawIcons() { if (window.lucide) try { lucide.createIcons({ attrs: { 'aria-hidden': 'true' } }); } catch (e) { } }
+
+/* ---------- 印刷・PDFで保存 ---------- */
+// claude.ai のページ（iframe の中）では印刷の画面を開けない（window.print() が何もしない）ため、「PDFで保存」にする
+const IN_FRAME = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+const printBtn = () => IN_FRAME
+  ? `<button type="button" class="btn sm hide-sm no-print" data-act="pdfView">${icon('file-down')}PDFで保存</button>`
+  : `<button type="button" class="btn sm hide-sm no-print" data-act="printView">${icon('printer')}印刷</button>`;
+const PDFOUT_LIBS = ['https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'];
+let pdfOutReady = null, pdfBusy = false;
+function loadPdfOut() {
+  return pdfOutReady ||= (async () => { for (const u of PDFOUT_LIBS) await loadScript(u); if (!window.html2canvas || !window.jspdf) throw new Error('lib'); })()
+    .catch(() => { pdfOutReady = null; throw new Error('PDFを作る部品を読み込めませんでした（通信環境を確認してください）'); });
+}
+// 今の画面（タブ）の内容を、A4横のPDFにして保存する。表は全部広げ、カードや表の行の境目でページを分ける
+async function savePdfView() {
+  if (pdfBusy || !S) return;
+  pdfBusy = true; toast('PDFを作っています…');
+  const root = document.documentElement, prevTheme = root.dataset.theme;
+  const dark = prevTheme === 'dark' || (!prevTheme && matchMedia('(prefers-color-scheme: dark)').matches);
+  let box = null, switched = false;
+  try {
+    await loadPdfOut();
+    if (dark) { root.dataset.theme = 'light'; switched = true; render(); }   // グラフを明るい色で描き直す（印刷と同じ見た目）
+    const tab = TABS.find(t => t.id === ui.tab);
+    box = document.createElement('div'); box.className = 'pdf-shot'; box.setAttribute('aria-hidden', 'true');
+    box.innerHTML = `<div class="pdf-head"><strong style="font-size:20px">${esc(companyName(S))}　${esc(tab?.label || '')}</strong><span class="small">${esc(fyLabelLong(ui.fy))}　作成 ${esc(new Date().toLocaleString('ja-JP'))}</span></div>`;
+    const src = $('#main'), copy = src.cloneNode(true); copy.removeAttribute('id');
+    // グラフ（canvas）は複製すると絵が消えるため、画像にして置きかえる
+    const live = $$('canvas', src);
+    $$('canvas', copy).forEach((c, i) => { const img = document.createElement('img'); img.alt = ''; try { img.src = live[i].toDataURL('image/png'); } catch (e) { } img.style.width = live[i].clientWidth + 'px'; img.style.height = live[i].clientHeight + 'px'; c.replaceWith(img); });
+    box.appendChild(copy); document.body.appendChild(box);
+    // 横に長い表（月次推移など）は、全部が入る幅に広げる
+    let extra = 0; for (const w of $$('.tbl-wrap', box)) { const t = w.firstElementChild; if (t) extra = Math.max(extra, t.offsetWidth - w.clientWidth); }
+    if (extra > 0) box.style.width = `${1280 + extra + 8}px`;
+    await Promise.all($$('img', box).map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; })));
+    try { await document.fonts?.ready; } catch (e) { }
+    const scale = 1.5;
+    const canvas = await html2canvas(box, { scale, backgroundColor: '#ffffff', logging: false, useCORS: true, windowWidth: box.offsetWidth + 48 });
+    const top = box.getBoundingClientRect().top;
+    const cuts = $$('.card, tr, .notice, .grid > *, .pdf-head', box).map(e => (e.getBoundingClientRect().top - top) * scale).filter(y => y > 0).sort((a, b) => a - b);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape', compress: true });
+    const M = 10, W = 297 - M * 2, H = 210 - M * 2 - 6;
+    const pxPerMm = canvas.width / W, pageH = Math.floor(H * pxPerMm);
+    const pages = []; let y = 0;
+    while (y < canvas.height - 2) {
+      let end = Math.min(y + pageH, canvas.height);
+      if (end < canvas.height) { const c = cuts.filter(v => v > y + pageH * 0.3 && v <= end).pop(); if (c) end = Math.floor(c); }
+      pages.push([y, end]); y = end;
+    }
+    pages.forEach(([y0, y1], i) => {
+      const part = document.createElement('canvas'); part.width = canvas.width; part.height = y1 - y0;
+      const g = part.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, part.width, part.height);
+      g.drawImage(canvas, 0, y0, canvas.width, y1 - y0, 0, 0, canvas.width, y1 - y0);
+      if (i) pdf.addPage();
+      pdf.addImage(part.toDataURL('image/jpeg', 0.9), 'JPEG', M, M, W, (y1 - y0) / pxPerMm);
+      pdf.setFontSize(9); pdf.setTextColor(90); pdf.text(`${i + 1} / ${pages.length}`, 297 - M, 210 - M + 2, { align: 'right' });
+    });
+    const name = `業績管理_${companyName(S)}_${tab?.label || ''}_${fyLabel(ui.fy)}_${stamp()}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
+    await download(name, pdf.output('blob'), 'application/pdf');
+  } catch (e) { toast(/^PDFを作る部品/.test(e?.message || '') ? e.message : 'PDFを作れませんでした。もう一度お試しください。'); }
+  finally {
+    box?.remove();
+    if (switched) { if (prevTheme) root.dataset.theme = prevTheme; else delete root.dataset.theme; render(); }
+    pdfBusy = false;
+  }
+}
 
 /* ---------- グラフ ---------- */
 const charts = {};
@@ -1363,7 +1441,7 @@ function viewPL(main) {
     ${futureNotice()}
     <div class="card">
       <div class="card-hd"><h2>予実比較　${periodText()}</h2><span class="small muted">${unitNote()}・${esc(S.settings.tax)}</span>
-        <button class="btn sm" data-act="csvPL">${icon('file-down')}CSV出力</button><button class="btn sm hide-sm" onclick="window.print()">${icon('printer')}印刷</button></div>
+        <button class="btn sm no-print" data-act="csvPL">${icon('file-down')}CSV出力</button>${printBtn()}</div>
       ${salesB.vals.every(v => v == null) ? `<div class="notice" style="margin-bottom:12px">${icon('info')}<span>この年度の予算が未設定です。「設定・データ」の予算入力で設定すると、差異・達成率が表示されます（前年実績や前期決算書からの一括作成もできます）。</span></div>` : ''}
       <div class="tbl-wrap tall"><table class="tbl" id="plTable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
       <p class="small muted" style="margin-top:8px">差異の色：<span class="good">緑＝予算より有利</span>／<span class="bad">赤＝不利</span>（費用は予算より少ないほど有利）。負の数は「△」で表示。「—」は未設定・未確定。</p>
@@ -3200,7 +3278,7 @@ function viewCF(main) {
   }
   const fcf = cf.op + cf.inv, fcfP = cfP ? cfP.op + cfP.inv : null;
   main.innerHTML = `<div class="stack">
-    <div class="card stack"><div class="card-hd" style="margin:0"><h2>キャッシュ・フロー計算書（間接法）　${esc(ctx.title)}</h2><button class="btn sm" data-act="csvCF">${icon('file-down')}CSV出力</button><button class="btn sm hide-sm" onclick="window.print()">${icon('printer')}印刷</button></div>${controls}
+    <div class="card stack"><div class="card-hd" style="margin:0"><h2>キャッシュ・フロー計算書（間接法）　${esc(ctx.title)}</h2><button class="btn sm no-print" data-act="csvCF">${icon('file-down')}CSV出力</button>${printBtn()}</div>${controls}
       <p class="small muted">期首：${esc(ctx.B0.label)}　／　期末：${esc(ctx.B1.label)}　／　損益：${f.basis === 'fs' ? '決算書の損益計算書' : `損益の実績（${mLabel(0)}〜${mLabel(f.m)}）`}　／　${unitNote()}</p></div>
     ${warn.map(w => `<div class="notice warn">${icon('triangle-alert')}<span>${esc(w)}</span></div>`).join('')}
     <div class="grid g-kpi">
@@ -3681,6 +3759,7 @@ document.addEventListener('click', ev => {
   if (!act) return;
   const acts = {
     csvPL, csvCash, csvFin, csvCF,
+    printView: () => window.print(), pdfView: () => savePdfView(),
     addCompany: () => addCompanyDialog(), addCompanyFile: () => importCompanyFromFile(),
     resetVar: () => { S.varRates = {}; save('変動費の割合を標準に戻しました'); render(); },
     addSampleFin: () => { const fy = fyIdx(isoDate(new Date())).fy; snapshot('サンプルの決算書追加の前'); sampleFinance(S, fy, fyIdx(isoDate(new Date())).i - 1); ui.fin = { basis: null, m: null, avg: true }; save('サンプルの決算書・試算表を追加しました'); render(); },
