@@ -132,9 +132,9 @@ function viewOrderForm(id) {
     <div class="form-grid">
       ${fld('oMat', '商品名（材質・質別）', `<input type="text" id="oMat" list="matList2" value="${esc(v.material)}">`, { req: true, hint: '例：5056S-H34' })}
       ${fld('oOd', '外径（mm）', numIn('oOd', numStr(v.od)), { req: true })}
-      <div class="field" data-field="oInner"><label for="oInner">${v.innerKind === 't' ? '肉厚' : '内径'}（mm）<span class="req">※必須</span></label>
-        <div class="row"><div class="seg" role="group" aria-label="内径か肉厚か"><button type="button" data-act="oInnerKind" data-v="id" aria-pressed="${v.innerKind !== 't'}">内径</button><button type="button" data-act="oInnerKind" data-v="t" aria-pressed="${v.innerKind === 't'}">肉厚</button></div></div>
-        ${numIn('oInner', numStr(v.inner))}<input type="hidden" id="oInnerKind" value="${v.innerKind === 't' ? 't' : 'id'}"></div>
+      <div class="field" data-field="oInner"><div class="field-hd"><label for="oInner">${v.innerKind === 't' ? '肉厚' : '内径'}（mm）<span class="req">※必須</span></label>
+        <div class="row"><div class="seg" role="group" aria-label="内径か肉厚か"><button type="button" data-act="oInnerKind" data-v="id" aria-pressed="${v.innerKind !== 't'}">内径</button><button type="button" data-act="oInnerKind" data-v="t" aria-pressed="${v.innerKind === 't'}">肉厚</button></div></div></div>
+        <div class="field-ctl">${numIn('oInner', numStr(v.inner))}<input type="hidden" id="oInnerKind" value="${v.innerKind === 't' ? 't' : 'id'}"></div></div>
       ${fld('oLen', '長さ（mm）', numIn('oLen', numStr(v.length)), { req: true, hint: '定尺の長さ' })}
     </div>
     <h2>受注量・単価</h2>
@@ -142,9 +142,9 @@ function viewOrderForm(id) {
       ${fld('oQty', '受注量', txt('oQty', v.qtyText), { opt: true, hint: '伝票のとおりに。例：5M、300K、9000P（摘要に入ります）' })}
       ${fld('oCount', '受注本数', numIn('oCount', numStr(v.plannedCount)), { opt: true, hint: '入れると、出荷済み・残りの本数がわかります' })}
       ${fld('oKg', '受注重量（kg）', numIn('oKg', numStr(v.plannedKg)), { opt: true, hint: '<span id="oKgHint"></span>' })}
-      <div class="field" data-field="oPrice"><label for="oPrice">単価<span class="opt">※任意</span></label><p class="hint">伝票の P（1本の値段）か K（1kgの値段）</p>
-        <div class="row"><div class="seg" role="group" aria-label="単価の単位"><button type="button" data-act="oBasis" data-v="kg" aria-pressed="${pk === 'kg'}">K（円/kg）</button><button type="button" data-act="oBasis" data-v="pc" aria-pressed="${pk === 'pc'}">P（円/本）</button></div></div>
-        ${numIn('oPrice', numStr(v.unitPrice))}<input type="hidden" id="oBasis" value="${pk}"></div>
+      <div class="field" data-field="oPrice"><div class="field-hd"><label for="oPrice">単価<span class="opt">※任意</span></label><p class="hint">伝票の P（1本の値段）か K（1kgの値段）</p>
+        <div class="row"><div class="seg" role="group" aria-label="単価の単位"><button type="button" data-act="oBasis" data-v="kg" aria-pressed="${pk === 'kg'}">K（円/kg）</button><button type="button" data-act="oBasis" data-v="pc" aria-pressed="${pk === 'pc'}">P（円/本）</button></div></div></div>
+        <div class="field-ctl">${numIn('oPrice', numStr(v.unitPrice))}<input type="hidden" id="oBasis" value="${pk}"></div></div>
       ${fld('oNote', '出荷の注意', txt('oNote', v.note), { opt: true, cls: 'wide', hint: '例：楕円・曲り厳重注意、L=5200' })}
       ${fld('oMemo', 'メモ', txt('oMemo', v.memo), { opt: true, cls: 'wide', hint: '社内用' })}
     </div>
@@ -249,7 +249,7 @@ ui.cf = null;
 function viewCustomerForm(id) {
   const c = id ? custById(id) : null; if (id && !c) return notFound('得意先');
   if (!ui.cf || ui.cf.id !== (id || null)) ui.cf = { id: id || null, dests: c ? JSON.parse(JSON.stringify(c.destinations)) : [] };
-  const v = c || { code: nextCustCode(), name: '', kana: '', zip: '', address: '', address2: '', tel: '', fax: '', closingDay: 31, taxRounding: null, billToId: null, payNote: '', memo: '', opening: { date: '', balance: 0 }, active: true, needsCheck: [] };
+  const v = c || { code: nextCustCode(), name: '', kana: '', zip: '', address: '', address2: '', tel: '', fax: '', honorific: '御中', closingDay: 31, taxRounding: null, billToId: null, payNote: '', memo: '', opening: { date: '', balance: 0 }, active: true, needsCheck: [] };
   const cdOpts = [[5, '5日'], [10, '10日'], [15, '15日'], [20, '20日'], [25, '25日'], [31, '末日'], ['other', 'その他の日'], ['none', '締日なし（請求書を作らない）']];
   const cdSel = v.closingDay == null ? 'none' : [5, 10, 15, 20, 25, 31].includes(Number(v.closingDay)) ? Number(v.closingDay) : 'other';
   const others = sortCustomers(S.customers.filter(x => x.id !== id && (x.active || x.id === v.billToId) && billToOf(x.id) === x.id));
@@ -268,6 +268,7 @@ function viewCustomerForm(id) {
       ${fld('cAddr2', '住所2', txt('cAddr2', v.address2), { opt: true, cls: 'wide', hint: 'ビル名など' })}
       ${fld('cTel', '電話番号', txt('cTel', v.tel), { opt: true })}
       ${fld('cFax', 'FAX番号', txt('cFax', v.fax), { opt: true })}
+      ${fld('cHon', '宛名ラベルの敬称', sel('cHon', honOptions(v.honorific || ''), v.honorific || ''), { req: true, hint: '封筒のラベルに付けます。納品書・請求書の敬称は「設定・データ」で決めます' })}
     </div></div>
     <div class="card stack"><h2>請求</h2><div class="form-grid">
       ${fld('cClose', '締日', sel('cClose', cdOpts, cdSel), { req: true, hint: '「締日なし」は宛名だけの登録など、請求書を作らない得意先' })}
@@ -331,7 +332,7 @@ function bindCustomerForm(id) {
     if (!showErrors(form, errs)) return;
     const c0 = id ? custById(id) : null;
     const nc = g('#cNeedsCheck'); const needsCheck = nc ? (nc.checked ? (c0?.needsCheck || []) : []) : (c0?.needsCheck || []);
-    const rec = { code, name, kana: g('#cKana').value.trim(), zip: g('#cZip').value.trim(), address: g('#cAddr').value.trim(), address2: g('#cAddr2').value.trim(), tel: g('#cTel').value.trim(), fax: g('#cFax').value.trim(), closingDay: cd, billToId: billTo, taxRounding: g('#cTaxR').value || null, payNote: g('#cPay').value.trim(), memo: g('#cMemo').value.trim(), opening: { date: g('#cOpenDate').value, balance: ob || 0 }, active: g('#cActive').value === '1', needsCheck, destinations: ui.cf.dests.map(x => ({ ...x, code: toHalf(x.code || ''), name: String(x.name).trim(), short: String(x.short || '').trim(), id: x.id || uid(), active: x.active !== false })), updatedAt: nowIso() };
+    const rec = { code, name, kana: g('#cKana').value.trim(), zip: g('#cZip').value.trim(), address: g('#cAddr').value.trim(), address2: g('#cAddr2').value.trim(), tel: g('#cTel').value.trim(), fax: g('#cFax').value.trim(), honorific: g('#cHon').value, closingDay: cd, billToId: billTo, taxRounding: g('#cTaxR').value || null, payNote: g('#cPay').value.trim(), memo: g('#cMemo').value.trim(), opening: { date: g('#cOpenDate').value, balance: ob || 0 }, active: g('#cActive').value === '1', needsCheck, destinations: ui.cf.dests.map(x => ({ ...x, code: toHalf(x.code || ''), name: String(x.name).trim(), short: String(x.short || '').trim(), id: x.id || uid(), active: x.active !== false })), updatedAt: nowIso() };
     let c = c0;
     if (c) {
       const hasInv = activeInvoices(c.id).length;
@@ -485,11 +486,15 @@ function viewSetup() {
   const maxNo = arr => Math.max(0, ...arr.map(x => Number(x) || 0));
   const logs = S.log.slice(-80).reverse();
   return `
-  <div class="page-head"><div><h1>設定・データ</h1><p class="lead">会社の情報、伝票の番号、計算のきまり、バックアップです。</p></div></div>
+  <div class="page-head"><div><h1>設定・データ</h1><p class="lead">会社の情報、伝票の番号、計算のきまり、画面の見え方、バックアップです。</p></div></div>
   <div class="card stack"><h2>使っているデータ</h2>
     ${MODE === 'test' ? notice('warn', '<b>テストデータ（架空の取引先）を使っています。</b>本番のデータとは別に保存しています。試し終わったら、本番のデータに切り替えてください。') : notice('ok', '<b>本番のデータを使っています。</b>')}
     <div class="actions">${MODE === 'test' ? `<button type="button" class="btn" data-act="switchMode" data-v="main">${icon('database')}本番のデータに切り替える</button><button type="button" class="btn text" data-act="resetTest">${icon('rotate-ccw')}テストデータを作り直す</button>` : `<button type="button" class="btn" data-act="switchMode" data-v="test">${icon('database')}テストデータに切り替える（試すとき）</button>`}</div>
     <p class="small muted">保存先：この端末のブラウザの中（${storageKind === 'indexeddb' ? 'IndexedDB' : storageKind === 'localstorage' ? 'localStorage' : '保存できません'}）。ほかのパソコンやブラウザとは共有されません。ブラウザの「閲覧データの削除」をすると消えることがあるため、バックアップを書き出してください。</p>
+  </div>
+  <div class="card stack"><h2>画面の見え方（この端末だけ）</h2>
+    <div class="field"><span class="label" id="fhLabel">入力欄の高さ</span><p class="hint">低くすると、1つの画面に入る項目が増えます（マウスで使うパソコン向け）。スマホの幅では、押しやすさのため「ふつう」で表示します。この端末だけの設定で、データやバックアップには入りません。</p>
+      <div class="row"><div class="seg" role="group" aria-labelledby="fhLabel">${FIELD_HEIGHTS.map(([v, l]) => `<button type="button" data-act="fieldHeight" data-v="${v}" aria-pressed="${fieldHeight === v}">${l}</button>`).join('')}</div></div></div>
   </div>
   <form id="sForm" class="stack" novalidate>
     <div class="card stack"><h2>会社の情報（帳票に出ます）</h2><div class="form-grid">

@@ -4,7 +4,8 @@ function drawIcons() { if (window.lucide) try { lucide.createIcons({ attrs: { 'a
 const chip = (cls, ic, label) => `<span class="chip ${cls}">${ic ? icon(ic) : ''}${esc(label)}</span>`;
 const notice = (kind, html, ic) => `<div class="notice ${kind}" role="${kind === 'err' ? 'alert' : 'note'}">${icon(ic || { info: 'info', warn: 'triangle-alert', err: 'circle-alert', ok: 'circle-check' }[kind])}<div class="body">${html}</div></div>`;
 function fld(id, label, control, { req = false, opt = false, hint = '', cls = '' } = {}) {
-  return `<div class="field ${cls}" data-field="${id}"><label for="${id}">${esc(label)}${req ? '<span class="req">※必須</span>' : opt ? '<span class="opt">※任意</span>' : ''}</label>${hint ? `<p class="hint" id="${id}-hint">${hint}</p>` : ''}${control}</div>`;
+  // 見出し（ラベル・説明）と入力の部分を分ける。.form-grid の中では、同じ行の入力欄の上端がそろう
+  return `<div class="field ${cls}" data-field="${id}"><div class="field-hd"><label for="${id}">${esc(label)}${req ? '<span class="req">※必須</span>' : opt ? '<span class="opt">※任意</span>' : ''}</label>${hint ? `<p class="hint" id="${id}-hint">${hint}</p>` : ''}</div><div class="field-ctl">${control}</div></div>`;
 }
 const txt = (id, val, attrs = '') => `<input type="text" id="${id}" value="${esc(val ?? '')}" autocomplete="off" ${attrs}>`;
 const numIn = (id, val, attrs = '') => `<input type="text" inputmode="decimal" class="numin" id="${id}" value="${esc(val ?? '')}" autocomplete="off" ${attrs}>`;
@@ -37,6 +38,19 @@ function bindCustPicker(id) {
   // Enter（旧システムの「実行」）で決める。フォームを送らない
   ci.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
   se.addEventListener('change', () => { const c = custById(se.value); ci.value = c ? c.code : ''; msg.textContent = ''; });
+}
+/* ---------- 画面の見え方（この端末だけの設定。データ・バックアップには入れない） ---------- */
+const FIELD_HEIGHTS = [['normal', 'ふつう'], ['low', '低め'], ['lower', 'さらに低め']];
+let fieldHeight = 'normal';
+function applyFieldHeight(v) {
+  fieldHeight = FIELD_HEIGHTS.some(x => x[0] === v) ? v : 'normal';
+  if (fieldHeight === 'normal') document.documentElement.removeAttribute('data-fieldh'); else document.documentElement.dataset.fieldh = fieldHeight;
+}
+async function setFieldHeight(v) {
+  applyFieldHeight(v);
+  $$('[data-act=fieldHeight]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === fieldHeight)));
+  const ok = await kvSet('pref:fieldHeight', fieldHeight);
+  toast(ok ? `入力欄の高さを「${FIELD_HEIGHTS.find(x => x[0] === fieldHeight)[1]}」にしました` : '入力欄の高さを変えました（このブラウザでは覚えておけないため、閉じると元に戻ります）', ok ? 'circle-check' : 'circle-alert');
 }
 const destLabel = x => `${x.code ? `${x.code}　` : ''}${x.name}`;
 /** 摘要2に入れる送り先の略称（略称がなければ、会社の種類を除いた名前） */

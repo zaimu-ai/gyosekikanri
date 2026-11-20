@@ -20,7 +20,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
   - html2canvas 1.4.1・jsPDF 2.5.1（cdnjs。PDF を作るときだけ読み込む）
 - データは利用者のブラウザの中に保存します。
   - IndexedDB：database `seikyu-system`、store `kv`
-  - key：`data:main`・`data:test`・`backups:<mode>`・`mode`・`lastDaily:<mode>`
+  - key：`data:main`・`data:test`・`backups:<mode>`・`mode`・`lastDaily:<mode>`・`pref:fieldHeight`（入力欄の高さ。この端末だけの見え方の設定で、データ・バックアップには入れない）
   - IndexedDB が使えないときは、localStorage の `seikyu-system:` で始まる key に保存します。
 - 保存の形は `DATA_VERSION`（今は 3）で管理します。形を変えるときは `migrate` に古い形を読む処理を足し、古い key は消しません。
 - 会社の実際の情報（会社名・登録番号・振込先）はコードに入れません。
@@ -39,6 +39,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
   - 計算と保存（`src/20-core.js`）、帳票の大きさ（`src/40-print.js`）、宛名ラベルの位置と大きさ（`src/45-labels.js` の mm の計算）
   - 要素の `id`、`data-act`・`data-l`・`data-s`・`data-f`・`data-di`・`data-df` 属性
 - 業務の言葉の意味は変えません（「取消」「締日なし」「請求先」「摘要」など）。
+- 入力欄は「見出し（`.field-hd`）・入力（`.field-ctl`）・誤りの知らせ」の3段で、`.form-grid` の中では同じ行の入力欄の上端がそろいます。入力欄の高さは CSS 変数（`--ctl-h`・`--ctl-py`・`--seg-h`）と `:root[data-fieldh]` で切り替えます。この2つのしくみは残してください（利用者の依頼です）。
 
 ## 動作確認のしかた
 
@@ -52,6 +53,7 @@ repository 直下の `AGENTS.md`（業績管理のルール）のうち、「登
    - `node tests/e2e3.cjs`
    - `node tests/e2e4.cjs`
    - `node tests/e2e5.cjs`（途中で一覧入りに作り直し、最後に一覧なしで作り直します）
+   - `node tests/e2e6.cjs`
    - `node tests/pages.cjs`
    - `node tests/file-mode.cjs`
 4. テストには Playwright（Chromium）が必要です。使えない環境では、そのことを報告に書いてください。確かめていないことを「確認済み」と書かないでください。

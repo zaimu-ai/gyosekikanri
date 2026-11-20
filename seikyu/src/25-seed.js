@@ -4,7 +4,7 @@ function seedTestData(today = todayStr()) {
   if (!COMPANY_PRESET.name) d.company = { ...COMPANY_FICTIONAL };
   d.numbers = { delivery: 64450, kari: 27100, invoice: 120 };
   d.numbersConfirmed = true;
-  const mk = (code, name, closingDay, extra = {}) => ({ id: uid(), code, name, kana: '', zip: '', address: '', address2: '', tel: '', fax: '', closingDay, taxRounding: null, billToId: null, needsCheck: [], payNote: '', memo: '', destinations: [], opening: { date: '', balance: 0 }, active: true, createdAt: nowIso(), updatedAt: nowIso(), ...extra });
+  const mk = (code, name, closingDay, extra = {}) => ({ id: uid(), code, name, kana: '', zip: '', address: '', address2: '', tel: '', fax: '', closingDay, taxRounding: null, billToId: null, honorific: '', needsCheck: [], payNote: '', memo: '', destinations: [], opening: { date: '', balance: 0 }, active: true, createdAt: nowIso(), updatedAt: nowIso(), ...extra });
   const c1 = mk(101, '見本金属(株)', 20, { address: '大阪府堺市（架空）', tel: '000-000-0001', payNote: '翌月末 振込' });
   const c2 = mk(102, 'サンプル軽金(株) 本社', 31, { address: '大阪府大阪市（架空）', payNote: '翌月末 振込' });
   const c3 = mk(103, '架空産業(株)', 20, { payNote: '翌々月10日 手形' });

@@ -5,7 +5,29 @@
    - 宛名は消さない（使わなくなったら「使わない」）
    ========================================================= */
 ui.lb = { kind: 'addr', q: '', sel: [] };
-const HONORIFICS = [['御中', '御中'], ['様', '様'], ['殿', '殿'], ['', 'なし']];
+const HONORIFICS = [['御中', '御中'], ['様', '様'], ['殿', '殿'], ['', 'なし']];   // ラベルの設定（敬称をまだ決めていない宛名に付ける）。'' はなし
+/* 得意先・宛名ごとの敬称（honorific）：'' はまだ決めていない（ラベルの設定の敬称で印刷）、'-' はなし */
+const HON_CHOICES = [['御中', '御中'], ['様', '様'], ['殿', '殿'], ['-', 'なし']];
+const honFallback = () => S.labelSettings.honorific || 'なし';
+const honName = h => h === '-' ? 'なし' : h || 'まだ決めていない';
+function honOptions(cur, short = false) {
+  const o = [...HON_CHOICES];
+  if (cur && !o.some(x => x[0] === cur)) o.push([cur, cur]);   // 知らない敬称も消さずに出す
+  if (!cur) o.unshift(['', short ? `未登録（${honFallback()}）` : `まだ決めていない（今は「${honFallback()}」で印刷）`]);
+  return o;
+}
+/** ラベルに付ける敬称：得意先・宛名ごとに決めたもの → なければラベルの設定 */
+const honOf = r => { const h = r && r.honorific; return h === '-' ? '' : h ? h : S.labelSettings.honorific; };
+function setLabelHonorific(key, v) {
+  const [k, id] = key.split(':');
+  const r = k === 'a' ? S.addressees.find(x => x.id === id) : custById(id); if (!r) return;
+  if ((r.honorific || '') === v) return;
+  r.honorific = v; r.updatedAt = nowIso();
+  logAction(k === 'a' ? '宛名の敬称を登録' : '得意先の敬称を登録', `${r.code ?? ''} ${r.name}：${honName(v)}`, r.id);
+  save(); render();
+  const el = document.querySelector(`.lbHon[data-key="${key}"]`); if (el) el.focus();
+  toast(`${r.name} の敬称を「${honName(v)}」で登録しました`);
+}
 const labelKey = (kind, id) => `${kind}:${id}`;
 /** ラベルに使う宛名の一覧（種類・探す・使っているものだけ） */
 function labelCandidates() {
@@ -21,7 +43,7 @@ function labelFromKey(key) {
   const [k, id] = key.split(':');
   const r = k === 'a' ? S.addressees.find(x => x.id === id) : custById(id);
   if (!r) return null;
-  const hon = k === 'a' && r.honorific != null && r.honorific !== '' ? (r.honorific === '-' ? '' : r.honorific) : S.labelSettings.honorific;
+  const hon = honOf(r);
   return { name: r.name, hon, zip: r.zip || '', address: r.address || '', address2: r.address2 || '', ready: labelReady(r) };
 }
 function labelSheet() { const L = S.labelSettings; return L.sheet === 'custom' ? L.custom : (LABEL_SHEETS[L.sheet] || LABEL_SHEETS.me504t); }
@@ -71,6 +93,7 @@ function viewLabels() {
   const nAddr = S.addressees.filter(a => a.active).length;
   const blank = S.addressees.filter(a => a.active && !labelReady(a)).length;
   const num = (id, v, label, hint) => fld(id, label, numIn(id, numStr(v), `data-ls="${id}"`), { hint });
+  const noHon = cands.filter(x => !x.rec.honorific).length;
   return `
   <div class="page-head"><div><h1>宛名ラベル</h1><p class="lead">仕入先などの封筒に貼るラベルシールを印刷します。仕入先などの宛名は、得意先とは別に登録します（請求書は作りません）。</p></div>
     <div class="actions"><a class="btn" href="#addressee-new">${icon('plus')}宛名を登録する</a><a class="btn" href="#customers-import">${icon('file-up')}宛名を取り込む（CSV）</a></div></div>
@@ -81,9 +104,11 @@ function viewLabels() {
       ${fld('lbQ', '探す（コード・名前・住所）', txt('lbQ', f.q))}
     </div>
     <div class="actions"><button type="button" class="btn sm" data-act="lbAll" data-v="1">${icon('square-check')}表示している宛名をすべて選ぶ</button><button type="button" class="btn sm text" data-act="lbAll" data-v="0">${icon('square')}選ぶのをやめる</button><span class="small" id="lbCount">選んでいる宛名：${picked.size} 件</span></div>
-    ${cands.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th class="check-cell">選ぶ</th><th class="num">コード</th><th>名前</th><th>住所</th><th>種類</th></tr></thead><tbody>
+    <p class="small muted">${icon('info')} 敬称は、得意先・宛名ごとに登録します。表の「敬称」で選ぶと、その得意先・宛名に登録されます（得意先・宛名の画面でも直せます）。${noHon ? `<br>敬称をまだ決めていないものが、表示している中に ${noHon} 件あります。決めるまでは「${esc(honFallback())}」で印刷します。` : ''}</p>
+    ${cands.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th class="check-cell">選ぶ</th><th class="num">コード</th><th>名前</th><th>敬称</th><th>住所</th><th>種類</th></tr></thead><tbody>
       ${cands.map(x => { const r = x.rec; const ok = labelReady(r); return `<tr><td class="check-cell">${ok ? `<label class="check"><input type="checkbox" class="lbPick" value="${x.key}"${picked.has(x.key) ? ' checked' : ''} aria-label="${esc(r.name)} を選ぶ"></label>` : ''}</td>
         <td class="num">${esc(r.code ?? '')}</td><td><a href="${x.href}">${esc(r.name)}</a>${r.needsCheck && r.needsCheck.length ? `<span class="sub">${chip('warn', 'triangle-alert', `空欄：${r.needsCheck.join('・')}`)}</span>` : ''}</td>
+        <td class="hon-cell">${sel('', honOptions(r.honorific || '', true), r.honorific || '', `class="lbHon" data-key="${x.key}" aria-label="${esc(r.name)} の敬称"`).replace('<select id="" ', '<select ')}</td>
         <td>${ok ? `${r.zip ? `〒${esc(r.zip)} ` : ''}${esc(r.address)}${r.address2 ? ` ${esc(r.address2)}` : ''}` : chip('warn', 'circle-alert', '住所が空欄のため選べません')}</td><td>${x.kindLabel}</td></tr>`; }).join('')}
       </tbody></table></div>`
       : `<div class="empty">${icon('mail')}<p>${f.q ? '条件に合う宛名はありません。' : f.kind === 'addr' ? '仕入先などの宛名はまだありません。' : '宛名はありません。'}</p>${f.kind === 'addr' && !f.q ? `<div class="actions"><a class="btn" href="#addressee-new">${icon('plus')}宛名を登録する</a><a class="btn" href="#customers-import">${icon('file-up')}宛名を取り込む（CSV）</a></div>` : ''}</div>`}
@@ -94,7 +119,7 @@ function viewLabels() {
       ${fld('lsSheet', '用紙', sel('lsSheet', [...Object.entries(LABEL_SHEETS).map(([k, v]) => [k, v.label]), ['custom', '自分で決める']], L.sheet))}
       ${fld('lsStart', '1枚目は何枚目のラベルから使うか', sel('lsStart', Array.from({ length: per }, (_, i) => [i + 1, `${i + 1} 枚目から${i ? '' : '（新しい用紙）'}`]), Math.min(L.start, per)), { hint: '使いかけの用紙に印刷するとき。左上から右へ数えます' })}
       ${fld('lsCopies', '1件あたりの枚数', sel('lsCopies', Array.from({ length: 10 }, (_, i) => [i + 1, `${i + 1} 枚`]), L.copies))}
-      ${fld('lsHon', '敬称', sel('lsHon', HONORIFICS, L.honorific), { hint: '宛名ごとに決めているときはそちらを使います' })}
+      ${fld('lsHon', '敬称をまだ決めていないときの敬称', sel('lsHon', HONORIFICS, L.honorific), { hint: '得意先・宛名ごとに決めた敬称があれば、そちらを使います' })}
       ${num('lsOffX', L.offsetX, '位置の調整：右へ（mm）', 'ずれるときだけ。左へは −')}
       ${num('lsOffY', L.offsetY, '位置の調整：下へ（mm）', 'ずれるときだけ。上へは −')}
     </div>
@@ -114,6 +139,7 @@ function bindLabels() {
   $('#lbKind').onchange = e => { ui.lb.kind = e.target.value; render(); };
   $('#lbQ').onchange = e => { ui.lb.q = e.target.value; render(); };
   $$('.lbPick').forEach(x => x.addEventListener('change', () => { const s = new Set(ui.lb.sel); x.checked ? s.add(x.value) : s.delete(x.value); ui.lb.sel = [...s]; render(); }));
+  $$('.lbHon').forEach(x => x.addEventListener('change', () => setLabelHonorific(x.dataset.key, x.value)));
   const L = S.labelSettings;
   const setv = (id, fn) => { const el = $('#' + id); if (el) el.onchange = () => { fn(el.value); save(); render(); }; };
   setv('lsSheet', v => { if (v === 'custom' && L.sheet !== 'custom') L.custom = { ...labelSheet() }; L.sheet = v; L.chosen = true; L.start = 1; });
@@ -152,7 +178,7 @@ function openPrintLabels() {
 /* ---------- 宛名（仕入先など）の登録 ---------- */
 function viewAddresseeForm(id) {
   const a = id ? S.addressees.find(x => x.id === id) : null; if (id && !a) return notFound('宛名');
-  const v = a || { code: '', kana: '', name: '', honorific: '', zip: '', address: '', address2: '', tel: '', fax: '', memo: '', active: true, needsCheck: [] };
+  const v = a || { code: '', kana: '', name: '', honorific: '御中', zip: '', address: '', address2: '', tel: '', fax: '', memo: '', active: true, needsCheck: [] };
   return `${backLink('#labels', '宛名ラベル')}
   <div class="page-head"><div><h1>${a ? esc(a.name) : '宛名を登録する'}</h1><p class="lead">仕入先など、封筒のラベルを印刷する相手です。請求書は作りません（得意先には入りません）。</p></div></div>
   ${v.needsCheck && v.needsCheck.length ? notice('warn', `<b>取り込んだときに空欄にした項目：${esc(v.needsCheck.join('、'))}</b><br>元の一覧で文字が重なっていて読めなかった項目です。入れたら、下の「空欄の確認」を外してください。`) : ''}
@@ -161,7 +187,7 @@ function viewAddresseeForm(id) {
       ${fld('aCode', 'コード', numIn('aCode', v.code), { opt: true, hint: '事務コンと同じ番号' })}
       ${fld('aName', '名前', txt('aName', v.name), { req: true, hint: 'ラベルに出る名前' })}
       ${fld('aKana', 'メニュー（読みの頭文字）', txt('aKana', v.kana), { opt: true })}
-      ${fld('aHon', '敬称', sel('aHon', [['', `ラベルの設定に従う（今は${S.labelSettings.honorific || 'なし'}）`], ['御中', '御中'], ['様', '様'], ['殿', '殿'], ['-', 'なし']], v.honorific), { req: true })}
+      ${fld('aHon', '宛名ラベルの敬称', sel('aHon', honOptions(v.honorific || ''), v.honorific || ''), { req: true, hint: '会社・部署は御中、個人は様' })}
       ${fld('aZip', '郵便番号', txt('aZip', v.zip), { opt: true })}
       ${fld('aAddr', '住所1', txt('aAddr', v.address), { opt: true, cls: 'wide', hint: '空欄のままだとラベルに印刷できません' })}
       ${fld('aAddr2', '住所2', txt('aAddr2', v.address2), { opt: true, cls: 'wide', hint: 'ビル名・部署など' })}

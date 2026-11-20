@@ -123,6 +123,7 @@ const ACTIONS = {
   openLedger: el => { ui.lg = { cust: el.dataset.id, from: '', to: '' }; },
   lgPeriod: el => ledgerPeriod(Number(el.dataset.v)),
   switchMode: el => switchMode(el.dataset.v),
+  fieldHeight: el => setFieldHeight(el.dataset.v),
   resetTest: () => resetTestData(),
   exportBackup: () => exportBackup(),
   importBackup: () => $('#importFile').click(),
@@ -182,6 +183,7 @@ function showLoadError(raw, which) {
 async function boot() {
   idbConn = await openIdb();
   storageKind = idbConn ? 'indexeddb' : (() => { try { localStorage.setItem(LS_PREFIX + 't', '1'); localStorage.removeItem(LS_PREFIX + 't'); return 'localstorage'; } catch (e) { return 'none'; } })();
+  try { applyFieldHeight(await kvGet('pref:fieldHeight')); } catch (e) { applyFieldHeight('normal'); }
   let mode = await kvGet('mode');
   // はじめて開いたとき：本番のデータがあるか、旧システムの一覧を入れて作ったときは本番で開く
   if (mode !== 'main' && mode !== 'test') mode = ((await kvGet('data:main')) || MASTER_CSV) ? 'main' : 'test';

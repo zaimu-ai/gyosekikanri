@@ -147,10 +147,11 @@ function applyCustomerImport(R, adds) {
   for (const x of adds) {
     const r = x.rec;
     if (r.target === 'addr') {
+      // 敬称は旧システムの一覧にないため「まだ決めていない」で登録する（あとで宛名ラベルの画面などで決める）
       S.addressees.push({ id: uid(), createdAt: at, updatedAt: at, code: r.code, name: r.name, kana: r.kana, honorific: '', zip: r.zip, address: r.address, address2: r.address2, tel: r.tel, fax: r.fax, memo: '', active: true, needsCheck: r.needsCheck, legacy: { ...r.legacy, importedAt: at, fileName: R.fileName } });
       nAddr++; continue;
     }
-    const c = { id: uid(), createdAt: at, updatedAt: at, code: r.code, name: r.name, kana: r.kana, zip: r.zip, address: r.address, address2: r.address2, tel: r.tel, fax: r.fax, closingDay: r.closingDay, taxRounding: r.taxRounding, billToId: null, payNote: '', memo: '', opening: { date: '', balance: 0 }, active: true, destinations: [], needsCheck: r.needsCheck, legacy: { ...r.legacy, importedAt: at, fileName: R.fileName } };
+    const c = { id: uid(), createdAt: at, updatedAt: at, code: r.code, name: r.name, kana: r.kana, zip: r.zip, address: r.address, address2: r.address2, tel: r.tel, fax: r.fax, closingDay: r.closingDay, taxRounding: r.taxRounding, billToId: null, honorific: '', payNote: '', memo: '', opening: { date: '', balance: 0 }, active: true, destinations: [], needsCheck: r.needsCheck, legacy: { ...r.legacy, importedAt: at, fileName: R.fileName } };
     S.customers.push(c); made.push([c, r.billTo]);
   }
   for (const [c, b] of made) if (b != null) { const t = S.customers.find(x => Number(x.code) === b); if (t) c.billToId = t.id; }

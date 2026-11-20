@@ -4,7 +4,7 @@
    データは利用者のブラウザの中（IndexedDB。使えないときは localStorage）に保存する。
    登録したデータは消さない（取り消しは「取消」の状態で残す）。
    ========================================================= */
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 const DATA_VERSION = 3;
 
 /* ---------- 小さな道具 ---------- */
@@ -161,6 +161,7 @@ function migrate(d) {
     if (c.taxRounding === undefined) c.taxRounding = null;   // null＝会社の設定に従う
     if (c.billToId === undefined) c.billToId = null;         // null＝この得意先に請求する
     if (!Array.isArray(c.needsCheck)) c.needsCheck = [];
+    if (c.honorific == null) c.honorific = '';                // 宛名ラベルの敬称。''＝まだ決めていない（ラベルの設定の敬称で印刷）
     c.destinations.forEach(x => { if (x.code === undefined) x.code = ''; if (x.short === undefined) x.short = ''; });
   }
   for (const o of d.orders) { if (o.user === undefined) o.user = ''; if (o.qtyText === undefined) o.qtyText = ''; if (!o.priceBasis) o.priceBasis = 'kg'; }
